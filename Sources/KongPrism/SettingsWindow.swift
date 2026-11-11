@@ -450,6 +450,7 @@ struct UpdatesView: View {
                     Spacer()
                     if let found = controller.appRelease {
                         Button("下载并安装 \(found.release.version)") { controller.installAppUpdate() }.buttonStyle(.borderedProminent)
+                        Button("在浏览器中下载") { NSWorkspace.shared.open(AppUpdater.releasesPage) }
                     }
                     Button("检查更新") { Task { await controller.checkAppUpdate(userInitiated: true) } }
                 }
@@ -457,6 +458,9 @@ struct UpdatesView: View {
                     Text(notes).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 JobLine(job: controller.appTask)
+                if AppUpdater.isTranslocatedOrOutsideApplications {
+                    Text("KongPrism 不在“应用程序”文件夹里，更新会安装到 /Applications/KongPrism.app。").font(.caption).foregroundStyle(.orange)
+                }
                 Toggle("每天自动检查", isOn: $controller.settings.autoCheckAppUpdates)
                 LabeledContent("GitHub 令牌（可选）") {
                     SecureField("仓库公开时不用填", text: $controller.settings.githubToken)

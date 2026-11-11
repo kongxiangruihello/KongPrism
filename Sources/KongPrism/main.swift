@@ -34,7 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.menu = menu
         let controller = AppController.shared
         controller.launch()
+        AppUpdater.reportLastUpdate(controller: controller)
         if controller.profiles.isEmpty { settings.show(.profiles) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { AppUpdater.offerMoveToApplications() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

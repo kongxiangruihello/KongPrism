@@ -307,6 +307,7 @@ enum AppUpdater {
         }
         try checked.get()
         try await MainActor.run {
+            UserDefaults.standard.set(found.release.version, forKey: "updatingTo")
             beforeQuit()
             try relaunch(replacingWith: newApp)
         }
@@ -321,22 +322,46 @@ enum AppUpdater {
          "User-Agent": "KongPrism/\(version)"]
     }
 
+    static let releasesPage = URL(string: "https://github.com/\(owner)/\(repo)/releases/latest")!
+    private static var resultFile: URL { Paths.updates.appendingPathComponent("last-install.txt") }
+
+    /// Where the update is installed. A copy that runs translocated (opened straight from
+    /// Downloads, macOS runs it from a random read-only folder) or sits in a folder we cannot
+    /// write cannot be replaced, so it goes to /Applications instead.
+    static var installTarget: String {
+        let current = Bundle.main.bundleURL.path
+        let parent = (current as NSString).deletingLastPathComponent
+        if current.contains("/AppTranslocation/") || !current.hasSuffix(".app") || !FileManager.default.isWritableFile(atPath: parent) {
+            return "/Applications/KongPrism.app"
+        }
+        return current
+    }
+
+    static var isTranslocatedOrOutsideApplications: Bool {
+        let path = Bundle.main.bundleURL.path
+        return path.contains("/AppTranslocation/") || !path.hasPrefix("/Applications/")
+    }
+
     /// A helper waits for KongPrism to quit, swaps the bundle (restoring the old one if
-    /// copying fails), and opens the result. The old version is kept in updates/previous.
+    /// copying fails), writes the outcome for the next launch, and opens the result.
     private static func relaunch(replacingWith newApp: URL) throws {
-        let target = Bundle.main.bundleURL.path
+        let target = installTarget
         let backup = Paths.updates.appendingPathComponent("previous/KongPrism.app").path
+        try? FileManager.default.removeItem(at: resultFile)
         let script = """
         #!/bin/bash
-        pid="$1"; new="$2"; target="$3"; backup="$4"; log="$5"
+        pid="$1"; new="$2"; target="$3"; backup="$4"; log="$5"; result="$6"
         for i in $(seq 1 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
         {
           echo "$(date) 安装 $new -> $target"
           mkdir -p "$(dirname "$backup")"; rm -rf "$backup"
-          if ditto "$target" "$backup" && rm -rf "$target" && ditto "$new" "$target"; then
-            echo "安装完成"; rm -rf "$new"
+          [ -d "$target" ] && ditto "$target" "$backup"
+          if rm -rf "$target" && ditto "$new" "$target"; then
+            xattr -dr com.apple.quarantine "$target" 2>/dev/null
+            echo "安装完成"; echo "ok $target" > "$result"; rm -rf "$new"
           else
-            echo "安装失败，恢复原版本"; rm -rf "$target"; ditto "$backup" "$target"
+            echo "安装失败，恢复原版本"; echo "fail 无法写入 $target" > "$result"
+            rm -rf "$target"; [ -d "$backup" ] && ditto "$backup" "$target"
           fi
         } >> "$log" 2>&1
         open "$target"
@@ -345,11 +370,76 @@ enum AppUpdater {
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         let helper = Process()
         helper.executableURL = URL(fileURLWithPath: "/bin/bash")
-        helper.arguments = [scriptURL.path, String(ProcessInfo.processInfo.processIdentifier), newApp.path, target, backup, Paths.appLog.path]
+        helper.arguments = [scriptURL.path, String(ProcessInfo.processInfo.processIdentifier), newApp.path, target, backup,
+                            Paths.appLog.path, resultFile.path]
         helper.standardOutput = FileHandle.nullDevice
         helper.standardError = FileHandle.nullDevice
         try helper.run()
-        AppLog.write("更新已就绪，KongPrism 即将重启")
+        AppLog.write("更新已就绪，安装到 \(target)，KongPrism 即将重启")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) }
+    }
+
+    /// Called at launch: says whether the update just attempted took effect.
+    @MainActor
+    static func reportLastUpdate(controller: AppController) {
+        let defaults = UserDefaults.standard
+        guard let wanted = defaults.string(forKey: "updatingTo") else { return }
+        defaults.removeObject(forKey: "updatingTo")
+        let result = (try? String(contentsOf: resultFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "没有安装记录"
+        if version == wanted {
+            controller.appTask = .done("已更新到 \(version)")
+            AppLog.write("已更新到 \(version)")
+            return
+        }
+        AppLog.write("更新到 \(wanted) 没有生效：\(result)")
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "更新到 \(wanted) 没有装上"
+        alert.informativeText = "当前仍是 \(version)。原因：\(result)\n\n可以在浏览器里下载新版，解压后把 KongPrism 拖进“应用程序”文件夹替换旧版。"
+        alert.addButton(withTitle: "在浏览器中下载")
+        alert.addButton(withTitle: "好")
+        if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(releasesPage) }
+    }
+
+    /// Offers once to move a copy running from Downloads (or translocated) into /Applications,
+    /// where updates can replace it.
+    @MainActor
+    static func offerMoveToApplications() {
+        let defaults = UserDefaults.standard
+        guard isTranslocatedOrOutsideApplications, !defaults.bool(forKey: "declinedMoveToApplications") else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "把 KongPrism 移到“应用程序”文件夹？"
+        alert.informativeText = "KongPrism 现在不在“应用程序”文件夹里运行（例如直接从“下载”打开），这样在线更新无法替换它。移过去后会自动重新打开。"
+        alert.addButton(withTitle: "移过去")
+        alert.addButton(withTitle: "不用了")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            defaults.set(true, forKey: "declinedMoveToApplications")
+            return
+        }
+        let target = "/Applications/KongPrism.app"
+        let source = Bundle.main.bundleURL.path
+        let script = """
+        #!/bin/bash
+        pid="$1"; source="$2"; target="$3"
+        for i in $(seq 1 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+        rm -rf "$target" && ditto "$source" "$target" && xattr -dr com.apple.quarantine "$target" 2>/dev/null
+        open "$target"
+        """
+        do {
+            let url = Paths.updates.appendingPathComponent("move.sh")
+            try script.write(to: url, atomically: true, encoding: .utf8)
+            let helper = Process()
+            helper.executableURL = URL(fileURLWithPath: "/bin/bash")
+            helper.arguments = [url.path, String(ProcessInfo.processInfo.processIdentifier), source, target]
+            helper.standardOutput = FileHandle.nullDevice
+            helper.standardError = FileHandle.nullDevice
+            try helper.run()
+            AppLog.write("移到应用程序文件夹：\(source) -> \(target)")
+            AppController.shared.shutdown()
+            NSApp.terminate(nil)
+        } catch {
+            AppLog.write("移动失败：\(error.localizedDescription)")
+        }
     }
 }
