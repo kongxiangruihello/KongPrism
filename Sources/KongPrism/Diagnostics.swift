@@ -152,6 +152,9 @@ enum Diagnostics {
                 }
                 lines.append(Line(ok: worst.count >= 10 ? false : nil, text: text))
             }
+            if stats.directFailures > 0 {
+                lines.append(Line(ok: nil, text: "另有 \(stats.directFailures) 次直连失败（国内网站或局域网本身连不上，与节点无关）"))
+            }
             if stats.networkDown > 0 {
                 lines.append(Line(ok: nil, text: "另有 \(stats.networkDown) 条是网络暂时不可用时的报错（睡眠、唤醒或切换 Wi-Fi 时常见，不是节点问题）"))
             }

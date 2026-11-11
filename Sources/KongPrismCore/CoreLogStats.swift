@@ -18,6 +18,8 @@ public enum CoreLogStats {
     public struct Summary: Equatable {
         public var nodes: [NodeFailures] = []
         public var networkDown = 0
+        /// Failed connections that went out directly (not through a node).
+        public var directFailures = 0
         public var firstTime: String?
         public var lastTime: String?
     }
@@ -56,7 +58,7 @@ public enum CoreLogStats {
         var summary = Summary()
         var counts: [String: Int] = [:]
         var hosts: [String: [String: Int]] = [:]
-        let outbound = try? NSRegularExpression(pattern: #"using outbound/[a-z0-9-]+\[(.+?)\]: "#)
+        let outbound = try? NSRegularExpression(pattern: #"using outbound/([a-z0-9-]+)\[(.+?)\]: "#)
         let destination = try? NSRegularExpression(pattern: #"open connection to (\S+?)(?::\d+)? using"#)
         let time = try? NSRegularExpression(pattern: #"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"#)
         for raw in log.split(whereSeparator: \.isNewline) {
@@ -74,7 +76,10 @@ public enum CoreLogStats {
             let failed = nodeFailureMarkers.contains { line.contains($0) }
             // A line listing several attempts counts as network-down only if no attempt timed out.
             if down && !line.contains("i/o timeout") { summary.networkDown += 1; continue }
-            guard failed, let match = outbound?.firstMatch(in: line, range: range), let r = Range(match.range(at: 1), in: line) else { continue }
+            guard failed, let match = outbound?.firstMatch(in: line, range: range),
+                  let typeRange = Range(match.range(at: 1), in: line), let r = Range(match.range(at: 2), in: line) else { continue }
+            // 直连 / 拦截 are not nodes: a failed direct connection is the website's or the network's problem.
+            if ["direct", "block", "dns"].contains(String(line[typeRange])) { summary.directFailures += 1; continue }
             let node = String(line[r])
             counts[node, default: 0] += 1
             if let match = destination?.firstMatch(in: line, range: range), let h = Range(match.range(at: 1), in: line) {

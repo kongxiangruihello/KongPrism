@@ -37,7 +37,9 @@ enum SubscriptionFetcher {
         else if text.contains("sing-box") || text.contains("singbox") { first = "sing-box 1.14.4" }
         else if text.contains("v2ray") || text.contains("shadowrocket") { first = "v2rayN/7.13.8" }
         guard let first else { return agents }
-        return ["Clash.Meta", first] + agents.filter { $0 != first && $0 != "Clash.Meta" }
+        // The client named in the URL first: a provider answered Clash.Meta with "访问受限"
+        // for a …/clashx/… link and accepted ClashX (problem report, 2026-11-11).
+        return [first] + agents.filter { $0 != first }
     }
 
     /// The provider refused (403 / 401 / 429 or a "访问受限" placeholder) — automatic updates pause.

@@ -1,0 +1,368 @@
+{
+  "outbounds" : [
+    {
+      "password" : "redacted",
+      "server" : "server-1.example.com",
+      "server_port" : 6001,
+      "tag" : "中国香港-PRO-IPLC-HK1-1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-2.example.com",
+      "server_port" : 6002,
+      "tag" : "中国香港-PRO-IPLC-HK2-1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-3.example.com",
+      "server_port" : 5221,
+      "tag" : "德国-PRO-FW-DE1-流量倍率:0.5",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-4.example.com",
+      "server_port" : 5231,
+      "tag" : "澳大利亚-PRO-FW-AU2-流量倍率:0.5",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-5.example.com",
+      "server_port" : 6031,
+      "tag" : "新加坡-PRO-FW-SG1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-6.example.com",
+      "server_port" : 6032,
+      "tag" : "英国-PRO-FW-UK1-流量倍率:0.5",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-7.example.com",
+      "server_port" : 6033,
+      "tag" : "荷兰-PRO-FW-NL1-流量倍率:0.2",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-8.example.com",
+      "server_port" : 6012,
+      "tag" : "日本-PRO-FW-JP2-流量倍率:0.2",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-9.example.com",
+      "server_port" : 6011,
+      "tag" : "日本-PRO-FW-JP1-流量倍率:0.2",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-10.example.com",
+      "server_port" : 6021,
+      "tag" : "美国-PRO-FW-US1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-11.example.com",
+      "server_port" : 6022,
+      "tag" : "美国-PRO-FW-US2-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-12.example.com",
+      "server_port" : 465,
+      "tag" : "中国香港-PRO-HK1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-13.example.com",
+      "server_port" : 465,
+      "tag" : "日本-PRO-JP2-流量倍率:0.2",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-14.example.com",
+      "server_port" : 465,
+      "tag" : "日本-PRO-JP1-流量倍率:0.2",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-15.example.com",
+      "server_port" : 465,
+      "tag" : "新加坡-PRO-SG1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-16.example.com",
+      "server_port" : 465,
+      "tag" : "中国台湾-PRO-TW1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-17.example.com",
+      "server_port" : 465,
+      "tag" : "英国-PRO-UK1-流量倍率:0.5",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-18.example.com",
+      "server_port" : 465,
+      "tag" : "美国-PRO-US1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-19.example.com",
+      "server_port" : 465,
+      "tag" : "美国-PRO-US2-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-20.example.com",
+      "server_port" : 465,
+      "tag" : "荷兰-PRO-NL1-流量倍率:0.2",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-21.example.com",
+      "server_port" : 465,
+      "tag" : "德国-PRO-DE1-流量倍率:0.5",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-22.example.com",
+      "server_port" : 465,
+      "tag" : "澳大利亚-PRO-AU2-流量倍率:0.5",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-23.example.com",
+      "server_port" : 465,
+      "tag" : "美国-PRO-V6-1-流量倍率:1",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-24.example.com",
+      "server_port" : 465,
+      "tag" : "日本-PRO-V6-2-流量倍率:0.2",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-25.example.com",
+      "server_port" : 465,
+      "tag" : "英国-PRO-V6-3-流量倍率:0.5",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    },
+    {
+      "password" : "redacted",
+      "server" : "server-26.example.com",
+      "server_port" : 465,
+      "tag" : "荷兰-PRO-V6-4-流量倍率:0.2",
+      "tls" : {
+        "alpn" : [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled" : true
+      },
+      "type" : "trojan"
+    }
+  ]
+}
