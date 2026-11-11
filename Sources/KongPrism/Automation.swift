@@ -143,10 +143,16 @@ enum URLActions {
             if let mode { controller.setMode(mode) }
         case "node":
             guard !argument.isEmpty else { return }
-            // Exact name first, then the first node whose name contains it ("香港" → first Hong Kong node).
-            let members = controller.snapshot.groups[Groups.select]?.all ?? []
-            if let target = members.first(where: { $0 == argument }) ?? members.first(where: { $0.localizedCaseInsensitiveContains(argument) }) {
-                controller.select(target, in: Groups.select)
+            Task {
+                // The snapshot is only fetched when the menu opens; it may be empty or stale here.
+                await controller.refreshSnapshot()
+                // Exact name first, then the first node whose name contains it ("香港" → first Hong Kong node).
+                let members = controller.snapshot.groups[Groups.select]?.all ?? []
+                if let target = members.first(where: { $0 == argument }) ?? members.first(where: { $0.localizedCaseInsensitiveContains(argument) }) {
+                    controller.select(target, in: Groups.select)
+                } else {
+                    AppLog.write("链接动作：没有找到节点“\(argument)”")
+                }
             }
         case "test": controller.testAllNodes()
         case "update": Task { await controller.updateAllProfiles() }
