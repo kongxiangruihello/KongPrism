@@ -384,7 +384,7 @@ final class AppController: ObservableObject {
             let core = core
             let started = Date()
             let port = settings.mixedPort
-            let ports = [settings.mixedPort, settings.apiPort] + (settings.aiExitCheck ? [settings.apiPort + 1] : [])
+            let ports: [Int] = [settings.mixedPort, settings.apiPort] + (settings.aiExitCheck ? [settings.apiPort + 1] : [Int]())
             // Switching to enhanced mode: the TUN interface replaces the system proxy.
             let restoreProxy = settings.tunMode
             await sampleTraffic(force: true)
