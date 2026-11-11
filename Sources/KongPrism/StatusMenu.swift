@@ -23,12 +23,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         updateIcon()
         controller.$status.receive(on: RunLoop.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &cancellables)
         controller.$speed.receive(on: RunLoop.main).sink { [weak self] _ in self?.updateSpeed() }.store(in: &cancellables)
+        // Mode or enhanced mode changed: redraw the icon (only when they actually change).
+        controller.$settings.map { "\($0.mode)|\($0.tunMode)|\($0.showSpeed)" }.removeDuplicates().receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateIcon(); self?.updateSpeed() }.store(in: &cancellables)
     }
 
     /// "↓1.2M ↑30K" beside the icon while the speed display is on.
     private func updateSpeed() {
         guard let button = item.button else { return }
-        if controller.settings.showSpeed && controller.status.isRunning {
+        if controller.settings.showSpeed && controller.status.isRunning
+            && !(controller.settings.pauseSpeedOnBattery && PowerState.shared.shouldSave) {
             item.length = NSStatusItem.variableLength
             let text = "↓\(SpeedText.compact(controller.speed.down)) ↑\(SpeedText.compact(controller.speed.up))"
             button.attributedTitle = NSAttributedString(string: " " + text, attributes: [
@@ -44,7 +48,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let active = controller.status.isRunning
         var failed = false
         if case .failed = controller.status { failed = true }
-        item.button?.image = PrismIcon.menuBar(active: active, failed: failed)
+        item.button?.image = PrismIcon.menuBar(active: active, failed: failed, mode: controller.settings.mode, tun: controller.settings.tunMode)
         item.button?.toolTip = active ? "KongPrism：已连接" : "KongPrism：未连接"
     }
 
@@ -60,6 +64,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             await controller.checkSelectedNode()
             await controller.checkFailover()
             await controller.refreshExitInfoIfNeeded()
+            await controller.sampleTraffic()
             build()
         }
     }
@@ -150,6 +155,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let nodeItem = NSMenuItem(title: "节点：\(describe(selector.now ?? "—"))", action: nil, keyEquivalent: "")
             nodeItem.submenu = nodeMenu(selector)
             menu.addItem(nodeItem)
+            for service in Service.allCases {
+                guard let group = controller.snapshot.groups[service.groupName], let now = group.now else { continue }
+                let line = NSMenuItem(title: "    \(service.groupName) → \(now)", action: nil, keyEquivalent: "")
+                line.isEnabled = false
+                menu.addItem(line)
+            }
             if !controller.droppedNodes.isEmpty {
                 let dropped = NSMenuItem(title: "已跳过 \(controller.droppedNodes.count) 个内核不支持的节点", action: nil, keyEquivalent: "")
                 dropped.isEnabled = false
@@ -198,6 +209,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(action("复制终端代理命令", #selector(copyExports), key: "c"))
         menu.addItem(action("连接…", #selector(showConnections), key: "l"))
         menu.addItem(action("诊断连接…", #selector(diagnose), key: "d"))
+        menu.addItem(action("生成问题报告", #selector(problemReport), key: ""))
         if controller.appRelease != nil || controller.latestCore != nil {
             let update = action("有可用更新…", #selector(showUpdates), key: "")
             update.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
@@ -304,6 +316,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func manageProfiles() { openSettings?(.profiles) }
     @objc private func copyExports() { controller.copyShellExports() }
     @objc private func diagnose() { Diagnostics.show(controller: controller) }
+    @objc private func problemReport() { ProblemReport.create(controller: controller) }
     @objc private func switchToAuto() { controller.select(Groups.auto, in: Groups.select) }
     @objc private func showNodes() { openSettings?(.nodes) }
     @objc private func showConnections() { openConnections?() }
@@ -315,31 +328,40 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
 /// Icons drawn in code: a prism splitting one beam into three.
 enum PrismIcon {
-    static func menuBar(active: Bool, failed: Bool) -> NSImage {
+    /// Rule: outline prism splitting the beam into three rays. Global: filled prism.
+    /// Direct: the beam passes straight through. Enhanced mode: a small bar under the prism.
+    static func menuBar(active: Bool, failed: Bool, mode: String = "Rule", tun: Bool = false) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             let alpha: CGFloat = active ? 1 : 0.45
             NSColor.black.withAlphaComponent(alpha).setStroke()
             NSColor.black.withAlphaComponent(alpha).setFill()
-            // Prism
             let prism = NSBezierPath()
             prism.move(to: NSPoint(x: 7.5, y: 15.5))
-            prism.line(to: NSPoint(x: 13, y: 3))
-            prism.line(to: NSPoint(x: 2, y: 3))
+            prism.line(to: NSPoint(x: 13, y: 3.5))
+            prism.line(to: NSPoint(x: 2, y: 3.5))
             prism.close()
             prism.lineWidth = 1.6
             prism.lineJoinStyle = .round
             prism.stroke()
-            // Incoming beam and three outgoing rays
+            if active && mode.lowercased() == "global" { prism.fill() }
             let beam = NSBezierPath()
             beam.lineWidth = 1.3
             beam.lineCapStyle = .round
-            beam.move(to: NSPoint(x: 0.5, y: 9.5))
-            beam.line(to: NSPoint(x: 5.3, y: 8.6))
-            for y in [12.5, 9.0, 5.5] {
-                beam.move(to: NSPoint(x: 10.6, y: 8.6))
-                beam.line(to: NSPoint(x: 17.3, y: y))
+            beam.move(to: NSPoint(x: 0.5, y: 9.8))
+            beam.line(to: NSPoint(x: 5.3, y: 8.9))
+            if active && mode.lowercased() == "direct" {
+                beam.move(to: NSPoint(x: 10.6, y: 8.9))
+                beam.line(to: NSPoint(x: 17.3, y: 8.9))
+            } else {
+                for y in [12.8, 9.3, 5.8] {
+                    beam.move(to: NSPoint(x: 10.6, y: 8.9))
+                    beam.line(to: NSPoint(x: 17.3, y: y))
+                }
             }
             beam.stroke()
+            if active && tun {
+                NSBezierPath(roundedRect: NSRect(x: 3, y: 0.3, width: 9, height: 1.8), xRadius: 0.9, yRadius: 0.9).fill()
+            }
             if failed {
                 NSBezierPath(ovalIn: NSRect(x: 13.5, y: 13.5, width: 4, height: 4)).fill()
             }

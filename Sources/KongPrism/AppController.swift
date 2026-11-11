@@ -58,6 +58,10 @@ final class AppController: ObservableObject {
     private var stoppedByNetworkRule = false
     private var switchedToBackup = false
 
+    /// 0.4
+    @Published private(set) var stats = TrafficStats.load()
+    @Published private(set) var stagedUpdate: (version: String, app: URL)?
+
     private var exitFetchedAt: Date?
     private var exitKey = ""
     private var nodeFailures: [String: Int] = [:]
@@ -128,6 +132,10 @@ final class AppController: ObservableObject {
             Task { @MainActor in self?.didWake() }
         }
         traffic.onUpdate = { [weak self] up, down in self?.speed = (up, down) }
+        PowerState.shared.onChange = { [weak self] in
+            self?.updateSpeedMonitor()
+            self?.objectWillChange.send()
+        }
         networkWatcher.onChange = { [weak self] fingerprint in self?.networkChanged(fingerprint) }
         networkWatcher.start()
         networkWatcher.scheduleCheck(after: 0.5)
@@ -147,7 +155,8 @@ final class AppController: ObservableObject {
 
     /// The speed display streams only while it is switched on and the core runs.
     func updateSpeedMonitor() {
-        if settings.showSpeed && status.isRunning {
+        let paused = settings.pauseSpeedOnBattery && PowerState.shared.shouldSave
+        if settings.showSpeed && status.isRunning && !paused {
             if !traffic.isRunning { traffic.start(api: api) }
         } else {
             traffic.stop()
@@ -157,9 +166,17 @@ final class AppController: ObservableObject {
 
     /// Called from applicationWillTerminate: put the network back the way it was.
     func shutdown() {
+        sampleTrafficBlocking()
         if SystemProxy.hasBackup { try? SystemProxy.restore(port: settings.mixedPort) }
         core.stop()
         TunHelper.stop()
+    }
+
+    /// Quitting with an update downloaded and verified: it is swapped in after KongPrism exits.
+    func installStagedUpdateOnQuit() {
+        guard let staged = stagedUpdate else { return }
+        stagedUpdate = nil
+        AppUpdater.installStagedOnQuit(staged.app, version: staged.version)
     }
 
     func rescheduleBackgroundWork() { scheduler?.restart() }
@@ -261,6 +278,7 @@ final class AppController: ObservableObject {
             }
             status = .running
             settings.wasConnected = true
+            stats.coreRestarted()
             exitFetchedAt = nil
             nodeNotice = nil
             updateSpeedMonitor()
@@ -281,6 +299,7 @@ final class AppController: ObservableObject {
         let port = settings.mixedPort
         let core = core
         Task {
+            await sampleTraffic(force: true)
             await Shell.background {
                 if SystemProxy.hasBackup { try? SystemProxy.restore(port: port) }
                 core.stop()
@@ -301,9 +320,10 @@ final class AppController: ObservableObject {
 
     func reloadIfRunning() {
         guard status.isRunning else { return }
-        status = .stopped
         let core = core
         Task {
+            await sampleTraffic(force: true)
+            status = .stopped
             await Shell.background { core.stop() }
             connect()
         }
@@ -521,6 +541,80 @@ final class AppController: ObservableObject {
         exitKey = key
         exitFetchedAt = Date()
         exitInfo = await ExitLookup.fetch(port: settings.mixedPort)
+    }
+
+    // MARK: Traffic statistics
+
+    private var lastSample = Date.distantPast
+
+    /// Adds the core's counters to the statistics (menu open, hourly, before the core stops).
+    func sampleTraffic(force: Bool = false) async {
+        guard status.isRunning || force, force || Date().timeIntervalSince(lastSample) > 60 else { return }
+        guard let totals = try? await api.connections() else { return }
+        lastSample = Date()
+        stats.record(totalUp: totals.upload, totalDown: totals.download, profile: currentProfileLabel)
+        stats.save()
+    }
+
+    /// Used while quitting, when there is no time for async work: waits at most a second.
+    private func sampleTrafficBlocking() {
+        guard status.isRunning else { return }
+        final class Box: @unchecked Sendable { var value: (Int64, Int64)? }
+        let api = api
+        let box = Box()
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            if let totals = try? await api.connections() { box.value = (totals.upload, totals.download) }
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + 1) == .success, let result = box.value else { return }
+        stats.record(totalUp: result.0, totalDown: result.1, profile: currentProfileLabel)
+        stats.save()
+    }
+
+    private var currentProfileLabel: String {
+        settings.mergeAllProfiles ? "全部订阅（合并）" : (selectedProfile?.name ?? "未知")
+    }
+
+    func clearStats() {
+        let up = stats.lastUp, down = stats.lastDown
+        stats = TrafficStats()
+        stats.lastUp = up
+        stats.lastDown = down
+        stats.save()
+    }
+
+    // MARK: Service routing
+
+    func setServiceTarget(_ service: Service, _ target: String) {
+        if target == Service.follow { settings.serviceTargets[service.rawValue] = nil } else { settings.serviceTargets[service.rawValue] = target }
+        reloadIfRunning()
+    }
+
+    // MARK: Automatic updates
+
+    /// With automatic installation on: download and verify in the background (only on mains
+    /// power, not in Low Power Mode), then install when the Mac has been idle for five minutes
+    /// or when KongPrism quits, whichever comes first.
+    func stageUpdateIfWanted() async {
+        guard settings.autoInstallUpdates, let found = appRelease, stagedUpdate?.version != found.release.version,
+              !PowerState.shared.shouldSave else { return }
+        do {
+            let app = try await AppUpdater.stage(found, token: settings.githubToken, routes: proxyFirst) { _ in }
+            stagedUpdate = (found.release.version, app)
+            appTask = .done("\(found.release.version) 已下载，将在电脑空闲时或退出 KongPrism 时安装")
+            AppLog.write("已下载 \(found.release.version)，等待空闲时安装")
+            installStagedUpdateIfIdle()
+        } catch {
+            AppLog.write("后台下载更新失败：\(error.localizedDescription)")
+        }
+    }
+
+    func installStagedUpdateIfIdle() {
+        guard let staged = stagedUpdate, PowerState.idleSeconds >= 300, status != .starting else { return }
+        AppLog.write("电脑空闲，安装 \(staged.version)")
+        stagedUpdate = nil
+        try? AppUpdater.installStaged(staged.app, version: staged.version) { shutdown() }
     }
 
     func copyShellExports() {

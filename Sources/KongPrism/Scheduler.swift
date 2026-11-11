@@ -24,9 +24,16 @@ final class Scheduler {
         schedule("node-health", every: 15 * 60) { controller in
             await controller.checkSelectedNode()
             await controller.checkFailover()
+            controller.installStagedUpdateIfIdle()
+        }
+        schedule("traffic", every: 3600) { controller in
+            await controller.sampleTraffic()
         }
         schedule("updates", every: 24 * 3600) { controller in
-            if controller.settings.autoCheckAppUpdates { await controller.checkAppUpdate(userInitiated: false) }
+            if controller.settings.autoCheckAppUpdates || controller.settings.autoInstallUpdates {
+                await controller.checkAppUpdate(userInitiated: false)
+                await controller.stageUpdateIfWanted()
+            }
             if controller.settings.autoCheckCoreUpdates { await controller.checkCoreUpdate(userInitiated: false) }
         }
     }

@@ -103,6 +103,9 @@ struct RouteLookupView: View {
                         if answer.target == .proxy || answer.target == .byIP, let node = currentNode {
                             Text("当前节点：\(node)").font(.caption).foregroundStyle(.secondary)
                         }
+                        if case .service(let group) = answer.target, let now = controller.snapshot.groups[group]?.now {
+                            Text("该分组当前节点：\(now)").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                     if answer.target != .direct {
@@ -150,6 +153,7 @@ struct RouteLookupView: View {
         case .proxy: return "走节点"
         case .reject: return "拦截"
         case .byIP: return "看 IP 决定"
+        case .service(let group): return "走 \(group)"
         }
     }
     private func symbol(_ target: RouteExplainer.Target) -> String {
@@ -158,6 +162,7 @@ struct RouteLookupView: View {
         case .proxy: return "globe"
         case .reject: return "nosign"
         case .byIP: return "questionmark.circle"
+        case .service: return "sparkles"
         }
     }
     private func color(_ target: RouteExplainer.Target) -> Color {
@@ -166,6 +171,7 @@ struct RouteLookupView: View {
         case .proxy: return .blue
         case .reject: return .red
         case .byIP: return .orange
+        case .service: return .purple
         }
     }
 }

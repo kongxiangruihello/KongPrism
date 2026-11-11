@@ -88,7 +88,7 @@ public enum Groups {
     /// Failover: the backup subscription's own fastest-node group.
     public static let backup = "🛟 备用订阅"
     public static var reservedNames: Set<String> {
-        Set([select, auto, direct, backup, "GLOBAL"] + Region.all.map(\.groupName))
+        Set([select, auto, direct, backup, "GLOBAL"] + Region.all.map(\.groupName) + ["🤖 AI 服务", "▶️ YouTube", "🎬 Netflix"])
     }
 }
 

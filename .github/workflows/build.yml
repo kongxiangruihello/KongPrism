@@ -29,7 +29,40 @@ jobs:
           KONGPRISM_ARCH: arm64
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then export KONGPRISM_VERSION="${GITHUB_REF_NAME#v}"; fi
-          bash scripts/build-app.sh --test --zip
+          bash scripts/build-app.sh --test --zip --dmg
+
+      # Low power is a requirement: measure idle CPU time of the app and of the core on a real Mac.
+      - name: Idle energy check
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          cpu() { ps -o cputime= -p "$1" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))'; }
+          # The core, idle with a direct-only config.
+          cat > /tmp/idle.json <<'JSON'
+          {"log":{"level":"warn"},"inbounds":[{"type":"mixed","listen":"127.0.0.1","listen_port":17999}],
+           "outbounds":[{"type":"direct","tag":"direct"}],
+           "experimental":{"clash_api":{"external_controller":"127.0.0.1:19999","secret":"x"}}}
+          JSON
+          build/KongPrism.app/Contents/MacOS/sing-box run -c /tmp/idle.json >/tmp/idle.log 2>&1 &
+          core=$!
+          # The app (no subscription: it opens the settings window and waits).
+          open build/KongPrism.app
+          sleep 10
+          app="$(pgrep -x KongPrism | head -1)"
+          a0="$(cpu "$app")"; c0="$(cpu "$core")"
+          sleep 60
+          a1="$(cpu "$app")"; c1="$(cpu "$core")"
+          python3 - "$a0" "$a1" "$c0" "$c1" <<'PY'
+          import sys
+          a0, a1, c0, c1 = map(float, sys.argv[1:])
+          app, core = a1 - a0, c1 - c0
+          print(f"Idle CPU over 60 s: KongPrism {app:.2f} s ({app/60*100:.2f}%), sing-box {core:.2f} s ({core/60*100:.2f}%)")
+          assert app < 0.6, "KongPrism uses CPU while idle"
+          assert core < 0.6, "sing-box uses CPU while idle"
+          PY
+          top -l 2 -s 5 -pid "$app" -stats pid,command,cpu,idlew 2>/dev/null | tail -2 || true
+          kill "$core" || true
+          osascript -e 'tell application id "com.kongxiangrui.KongPrism" to quit' || pkill -x KongPrism || true
 
       # The enhanced-mode helper, exactly as the app installs it, on a real Mac (the runner has
       # passwordless sudo): root sing-box with a TUN interface, real traffic through it, then stop.
@@ -86,6 +119,7 @@ jobs:
           name: KongPrism
           path: |
             build/KongPrism-*.zip
+            build/KongPrism-*.dmg
             build/build.log
           if-no-files-found: error
 
@@ -120,4 +154,4 @@ jobs:
                     open("latest.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
           PY
           cat latest.json
-          gh release create "v$version" "$zip" latest.json --target "$GITHUB_SHA" --title "KongPrism $version" --notes-file notes.md
+          gh release create "v$version" "$zip" "build/KongPrism-$version.dmg" latest.json --target "$GITHUB_SHA" --title "KongPrism $version" --notes-file notes.md

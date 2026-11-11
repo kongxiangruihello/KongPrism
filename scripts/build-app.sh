@@ -5,6 +5,7 @@
 #   scripts/build-app.sh --test          run the unit tests first (including `sing-box check` on a generated config)
 #   scripts/build-app.sh --install       quit the running copy, install to /Applications, launch
 #   scripts/build-app.sh --zip           also write build/KongPrism-<version>.zip and its SHA-256 (for releases)
+#   scripts/build-app.sh --dmg           also write build/KongPrism-<version>.dmg (drag-to-Applications installer)
 #
 # Environment:
 #   KONGPRISM_ARCH=arm64|amd64           target architecture (default: this Mac)
@@ -19,12 +20,13 @@ mkdir -p build
 log="$root/build/build.log"
 exec > >(tee "$log") 2>&1
 
-install=0; test=0; zip=0
+install=0; test=0; zip=0; dmg=0
 for arg in "$@"; do
   case "$arg" in
     --install) install=1 ;;
     --test) test=1 ;;
     --zip) zip=1 ;;
+    --dmg) dmg=1 ;;
     *) echo "unknown option: $arg"; exit 2 ;;
   esac
 done
@@ -109,6 +111,18 @@ if [[ $zip -eq 1 ]]; then
   echo "$sha" > "$zip_path.sha256"
   echo "Zip: $zip_path"
   echo "SHA-256: $sha"
+fi
+
+if [[ $dmg -eq 1 ]]; then
+  echo "== dmg =="
+  dmg_stage="$staging/dmg"
+  mkdir -p "$dmg_stage"
+  ditto "$root/build/KongPrism.app" "$dmg_stage/KongPrism.app"
+  ln -s /Applications "$dmg_stage/Applications"
+  dmg_path="$root/build/KongPrism-$version.dmg"
+  rm -f "$dmg_path"
+  hdiutil create -volname "KongPrism $version" -srcfolder "$dmg_stage" -ov -format UDZO "$dmg_path" >/dev/null
+  echo "DMG: $dmg_path"
 fi
 
 if [[ $install -eq 1 ]]; then

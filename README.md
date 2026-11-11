@@ -21,7 +21,7 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 在 Mac 上把仓库克隆到本地，双击 **`构建并安装.command`**：它会下载并校验 sing-box 内核、运行单元测试
 （包括用真实 sing-box 检查生成的配置）、编译并安装到“应用程序”文件夹。需要 Xcode 或 Command Line Tools。
 
-也可以从 GitHub Actions / Releases 下载编好的 `KongPrism-x.y.z.zip`。
+也可以从 Releases 下载 **`KongPrism-x.y.z.dmg`**，打开后把 KongPrism 拖进“应用程序”文件夹（请勿直接在“下载”里运行，否则在线更新无法替换它）。
 
 ## 使用
 

@@ -10,6 +10,8 @@ public enum RouteExplainer {
         case reject
         /// Decided after resolving the IP (smart IP routing): Chinese IPs direct, others proxy.
         case byIP
+        /// A service rule (按服务分流) sends it to that service's group.
+        case service(String)
     }
 
     public struct Answer: Equatable {
@@ -46,6 +48,11 @@ public enum RouteExplainer {
         if let suffix = matchingSuffix(host, options.proxyDomains) { return answer(.proxy, "命中你的“总是走代理”：\(suffix)") }
         if !isIP {
             if options.blockAds, inRuleSet(.ads, host) { return answer(.reject, "在广告域名列表里（geosite-category-ads-all），会被拦截") }
+            for service in options.routedServices where inRuleSet(service.ruleSet, host) {
+                let target = options.serviceTargets[service.rawValue] ?? Service.follow
+                if target == Service.direct { return answer(.direct, "属于\(service.title)，按“按服务分流”设定直连") }
+                return answer(.service(service.groupName), "属于\(service.title)，走“\(service.groupName)”：\(Service.targetTitle(target))")
+            }
             if inRuleSet(.geositeCN, host) { return answer(.direct, "在国内域名列表里（geosite-cn），直连") }
             if inRuleSet(.geositeNotCN, host) { return answer(.proxy, "在国外域名列表里（geosite-geolocation-!cn），走节点") }
             if options.smartIPRouting {

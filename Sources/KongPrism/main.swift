@@ -58,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         AppController.shared.shutdown()
+        AppController.shared.installStagedUpdateOnQuit()
     }
 
     /// clash:// sing-box:// kongprism:// links, and files opened with KongPrism.

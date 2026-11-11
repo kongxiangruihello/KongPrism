@@ -3,7 +3,7 @@ import SwiftUI
 import KongPrismCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case profiles, nodes, general, rules, updates, about
+    case profiles, nodes, general, rules, stats, updates, about
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -11,6 +11,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .nodes: return "节点"
         case .general: return "常规"
         case .rules: return "分流"
+        case .stats: return "统计"
         case .updates: return "更新"
         case .about: return "关于"
         }
@@ -21,6 +22,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .nodes: return "point.3.connected.trianglepath.dotted"
         case .general: return "gearshape"
         case .rules: return "arrow.triangle.branch"
+        case .stats: return "chart.bar"
         case .updates: return "arrow.down.circle"
         case .about: return "info.circle"
         }
@@ -63,6 +65,7 @@ struct SettingsView: View {
             NodesView().tabItem { Label(SettingsTab.nodes.title, systemImage: SettingsTab.nodes.symbol) }.tag(SettingsTab.nodes)
             GeneralView().tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.symbol) }.tag(SettingsTab.general)
             RulesView().tabItem { Label(SettingsTab.rules.title, systemImage: SettingsTab.rules.symbol) }.tag(SettingsTab.rules)
+            StatsView().tabItem { Label(SettingsTab.stats.title, systemImage: SettingsTab.stats.symbol) }.tag(SettingsTab.stats)
             UpdatesView().tabItem { Label(SettingsTab.updates.title, systemImage: SettingsTab.updates.symbol) }.tag(SettingsTab.updates)
             AboutView().tabItem { Label(SettingsTab.about.title, systemImage: SettingsTab.about.symbol) }.tag(SettingsTab.about)
         }
@@ -301,6 +304,8 @@ struct GeneralView: View {
                 Toggle("菜单栏显示网速", isOn: $controller.settings.showSpeed)
                     .onChange(of: controller.settings.showSpeed) { _ in controller.updateSpeedMonitor() }
                 Text("每秒刷新一次，会多耗一点电；默认关闭。").font(.caption).foregroundStyle(.secondary)
+                Toggle("使用电池或低电量模式时暂停网速显示", isOn: $controller.settings.pauseSpeedOnBattery)
+                    .onChange(of: controller.settings.pauseSpeedOnBattery) { _ in controller.updateSpeedMonitor() }
                 Toggle("手选的节点连不上时，自动切回“自动选择”", isOn: $controller.settings.autoFailover)
                 Toggle("订阅快到期或流量快用完时发系统通知", isOn: $controller.settings.usageNotifications)
             }
@@ -338,6 +343,7 @@ struct GeneralView: View {
                 }
                 Toggle("允许局域网设备使用（监听 0.0.0.0）", isOn: $controller.settings.allowLAN)
                     .onChange(of: controller.settings.allowLAN) { _ in controller.reloadIfRunning() }
+                if controller.settings.allowLAN { LANShareView() }
             }
             Section("DNS") {
                 TextField("国外域名 DNS（经代理）", text: $controller.settings.remoteDNS)
@@ -381,6 +387,9 @@ struct RulesView: View {
         Form {
             Section("这个网站走哪条线？") {
                 RouteLookupView()
+            }
+            Section("按服务分流") {
+                ServiceRoutingSection()
             }
             Section("规则") {
                 Toggle("拦截广告域名（geosite-category-ads-all）", isOn: $controller.settings.blockAds)
@@ -462,6 +471,9 @@ struct UpdatesView: View {
                     Text("KongPrism 不在“应用程序”文件夹里，更新会安装到 /Applications/KongPrism.app。").font(.caption).foregroundStyle(.orange)
                 }
                 Toggle("每天自动检查", isOn: $controller.settings.autoCheckAppUpdates)
+                Toggle("自动下载并安装新版本", isOn: $controller.settings.autoInstallUpdates)
+                Text("只在接通电源、未开低电量模式时下载；下载并校验后，在电脑空闲 5 分钟或退出 KongPrism 时安装。")
+                    .font(.caption).foregroundStyle(.secondary)
                 LabeledContent("GitHub 令牌（可选）") {
                     SecureField("仓库公开时不用填", text: $controller.settings.githubToken)
                         .textFieldStyle(.roundedBorder)
@@ -517,6 +529,7 @@ struct AboutView: View {
                 • 节点测速只在分组被使用时进行（idle_timeout），不用时不测。
                 • 菜单只在打开时向内核取数据，后台无轮询、无计时器；订阅、规则、更新检查交给 macOS 统一调度（NSBackgroundActivityScheduler），低电量时自动推迟。
                 • 内核日志级别 warn，不经管道读取；规则集为本地二进制文件，改动后内核自动重载。
+                • 用电池或低电量模式时：暂停网速显示、不下载更新；流量统计只在打开菜单、每小时一次和关闭代理时记录。
                 """).font(.callout)
             }
             Section("文件") {
@@ -526,6 +539,7 @@ struct AboutView: View {
                     Button("复制终端代理命令") { controller.copyShellExports() }
                     Button("诊断连接…") { Diagnostics.show(controller: controller) }
                     Button("导出脱敏订阅样本…") { Diagnostics.exportSample(controller: controller) }
+                    Button("生成问题报告") { ProblemReport.create(controller: controller) }
                 }
                 Text(ShellExports.command(port: controller.settings.mixedPort)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }

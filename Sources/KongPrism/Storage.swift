@@ -112,6 +112,10 @@ struct AppSettings: Codable, Equatable {
     var networkAutomation = true
     var usageNotifications = true
     var notifiedWarnings: [String: Date] = [:]
+    /// 0.4 features
+    var autoInstallUpdates = false
+    var pauseSpeedOnBattery = true
+    var serviceTargets: [String: String] = [:]
     /// Bumped when a default changes for everyone (see the migration in init(from:)).
     var settingsVersion = AppSettings.currentVersion
 
@@ -164,6 +168,9 @@ struct AppSettings: Codable, Equatable {
         networkAutomation = v(.networkAutomation, d.networkAutomation)
         usageNotifications = v(.usageNotifications, d.usageNotifications)
         notifiedWarnings = v(.notifiedWarnings, d.notifiedWarnings)
+        autoInstallUpdates = v(.autoInstallUpdates, d.autoInstallUpdates)
+        pauseSpeedOnBattery = v(.pauseSpeedOnBattery, d.pauseSpeedOnBattery)
+        serviceTargets = v(.serviceTargets, d.serviceTargets)
         let version = v(.settingsVersion, 1)
         // 0.1.0 resolved unknown domains through the domestic DNS and sent the IP to the
         // proxy, which broke sites with polluted answers; turn that off once for everyone.
@@ -192,6 +199,7 @@ struct AppSettings: Codable, Equatable {
         options.directDomains = directDomains
         options.proxyDomains = proxyDomains
         options.tun = tunMode
+        options.serviceTargets = serviceTargets
         return options
     }
 }

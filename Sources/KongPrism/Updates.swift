@@ -279,6 +279,16 @@ enum AppUpdater {
     /// `beforeQuit` runs on the main thread right before quitting (restores the system proxy).
     static func install(_ found: Found, token: String, routes: [Net.Route], progress: @escaping @Sendable (Double) -> Void,
                         beforeQuit: @escaping () -> Void) async throws {
+        let newApp = try await stage(found, token: token, routes: routes, progress: progress)
+        try await MainActor.run {
+            UserDefaults.standard.set(found.release.version, forKey: "updatingTo")
+            beforeQuit()
+            try relaunch(replacingWith: newApp, reopen: true)
+        }
+    }
+
+    /// Downloads, checks (SHA-256, bundle identifier, signature) and unpacks an update; returns the new app.
+    static func stage(_ found: Found, token: String, routes: [Net.Route], progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         var headers: [String: String] = [:]
         if !token.isEmpty {
             headers = apiHeaders(token)
@@ -299,18 +309,28 @@ enum AppUpdater {
             let unzip = Shell.run("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
             guard unzip.ok, FileManager.default.fileExists(atPath: newApp.path) else { throw CoreManager.CoreError("解压更新失败") }
             Shell.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", newApp.path])
-            let bundle = Bundle(url: newApp)
-            guard bundle?.bundleIdentifier == Bundle.main.bundleIdentifier else { throw CoreManager.CoreError("更新包不是 KongPrism") }
+            let info = NSDictionary(contentsOf: newApp.appendingPathComponent("Contents/Info.plist"))
+            guard info?["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier else { throw CoreManager.CoreError("更新包不是 KongPrism") }
             let verify = Shell.run("/usr/bin/codesign", ["--verify", "--deep", newApp.path])
             guard verify.ok else { throw CoreManager.CoreError("更新包签名无效：\(verify.output)") }
             return ()
         }
         try checked.get()
-        try await MainActor.run {
-            UserDefaults.standard.set(found.release.version, forKey: "updatingTo")
-            beforeQuit()
-            try relaunch(replacingWith: newApp)
-        }
+        return newApp
+    }
+
+    /// Installs a staged update now and reopens KongPrism.
+    @MainActor
+    static func installStaged(_ newApp: URL, version: String, beforeQuit: () -> Void) throws {
+        UserDefaults.standard.set(version, forKey: "updatingTo")
+        beforeQuit()
+        try relaunch(replacingWith: newApp, reopen: true)
+    }
+
+    /// While KongPrism is quitting anyway: swap in a staged update without reopening.
+    static func installStagedOnQuit(_ newApp: URL, version: String) {
+        UserDefaults.standard.set(version, forKey: "updatingTo")
+        try? relaunch(replacingWith: newApp, reopen: false, quit: false)
     }
 
     private static func decode(_ data: Data) throws -> AppRelease {
@@ -344,13 +364,13 @@ enum AppUpdater {
 
     /// A helper waits for KongPrism to quit, swaps the bundle (restoring the old one if
     /// copying fails), writes the outcome for the next launch, and opens the result.
-    private static func relaunch(replacingWith newApp: URL) throws {
+    private static func relaunch(replacingWith newApp: URL, reopen: Bool, quit: Bool = true) throws {
         let target = installTarget
         let backup = Paths.updates.appendingPathComponent("previous/KongPrism.app").path
         try? FileManager.default.removeItem(at: resultFile)
         let script = """
         #!/bin/bash
-        pid="$1"; new="$2"; target="$3"; backup="$4"; log="$5"; result="$6"
+        pid="$1"; new="$2"; target="$3"; backup="$4"; log="$5"; result="$6"; reopen="$7"
         for i in $(seq 1 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
         {
           echo "$(date) 安装 $new -> $target"
@@ -364,19 +384,19 @@ enum AppUpdater {
             rm -rf "$target"; [ -d "$backup" ] && ditto "$backup" "$target"
           fi
         } >> "$log" 2>&1
-        open "$target"
+        [ "$reopen" = 1 ] && open "$target"
         """
         let scriptURL = Paths.updates.appendingPathComponent("install.sh")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         let helper = Process()
         helper.executableURL = URL(fileURLWithPath: "/bin/bash")
         helper.arguments = [scriptURL.path, String(ProcessInfo.processInfo.processIdentifier), newApp.path, target, backup,
-                            Paths.appLog.path, resultFile.path]
+                            Paths.appLog.path, resultFile.path, reopen ? "1" : "0"]
         helper.standardOutput = FileHandle.nullDevice
         helper.standardError = FileHandle.nullDevice
         try helper.run()
-        AppLog.write("更新已就绪，安装到 \(target)，KongPrism 即将重启")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) }
+        AppLog.write("更新已就绪，安装到 \(target)" + (reopen ? "，KongPrism 即将重启" : "（退出后生效）"))
+        if quit { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) } }
     }
 
     /// Called at launch: says whether the update just attempted took effect.

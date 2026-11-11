@@ -15,7 +15,13 @@ public struct RuleSet: Equatable, Sendable {
                                     repo: "sing-geosite", remote: "geosite-category-ads-all.srs")
     public static let geoipCN = RuleSet(tag: "geoip-cn", file: "geoip-cn.srs", repo: "sing-geoip", remote: "geoip-cn.srs")
 
-    public static let all: [RuleSet] = [geositeCN, geositeNotCN, ads, geoipCN]
+    public static let ai = RuleSet(tag: "geosite-category-ai-!cn", file: "geosite-category-ai-not-cn.srs",
+                                   repo: "sing-geosite", remote: "geosite-category-ai-!cn.srs")
+    public static let youtube = RuleSet(tag: "geosite-youtube", file: "geosite-youtube.srs", repo: "sing-geosite", remote: "geosite-youtube.srs")
+    public static let netflix = RuleSet(tag: "geosite-netflix", file: "geosite-netflix.srs", repo: "sing-geosite", remote: "geosite-netflix.srs")
+
+    /// Everything the rule updater keeps fresh; a config declares only the sets it uses.
+    public static let all: [RuleSet] = [geositeCN, geositeNotCN, ads, geoipCN, ai, youtube, netflix]
 
     init(tag: String, file: String, repo: String, remote: String) {
         self.tag = tag
@@ -27,6 +33,52 @@ public struct RuleSet: Equatable, Sendable {
             "https://cdn.jsdelivr.net/gh/SagerNet/\(repo)@rule-set/\(escaped)",
         ]
     }
+}
+
+/// Services that can leave through a region of their own (按服务分流).
+public enum Service: String, CaseIterable, Codable, Sendable {
+    case ai, youtube, netflix
+
+    public var title: String {
+        switch self {
+        case .ai: return "AI 服务（ChatGPT、Claude、Gemini 等）"
+        case .youtube: return "YouTube"
+        case .netflix: return "Netflix"
+        }
+    }
+
+    public var groupName: String {
+        switch self {
+        case .ai: return "🤖 AI 服务"
+        case .youtube: return "▶️ YouTube"
+        case .netflix: return "🎬 Netflix"
+        }
+    }
+
+    public var ruleSet: RuleSet {
+        switch self {
+        case .ai: return .ai
+        case .youtube: return .youtube
+        case .netflix: return .netflix
+        }
+    }
+
+    /// Where a service goes: "follow" (节点选择), "no-hk" (fastest node outside Hong Kong),
+    /// a region code ("JP", "SG", …) or "direct".
+    public static let follow = "follow"
+    public static let noHK = "no-hk"
+    public static let direct = "direct"
+
+    public static func targetTitle(_ target: String) -> String {
+        switch target {
+        case follow: return "跟随节点选择"
+        case noHK: return "自动（排除香港）"
+        case direct: return "直连"
+        default: return Region.all.first { $0.code == target }?.groupName ?? target
+        }
+    }
+
+    public static var targets: [String] { [follow, noHK] + Region.all.map(\.code) + [direct] }
 }
 
 /// Everything that shapes the generated sing-box config.
@@ -55,6 +107,13 @@ public struct CoreOptions: Equatable, Sendable {
     public var tun = false
     /// Serve an expired DNS answer at once and refresh it in the background (sing-box 1.14).
     public var optimisticDNS = true
+    /// Service → target (see Service.targets); missing means "follow".
+    public var serviceTargets: [String: String] = [:]
+
+    /// Services that get a rule of their own.
+    public var routedServices: [Service] {
+        Service.allCases.filter { (serviceTargets[$0.rawValue] ?? Service.follow) != Service.follow }
+    }
     /// Domains always sent direct / always proxied (user rules).
     public var directDomains: [String] = []
     public var proxyDomains: [String] = []
@@ -102,6 +161,22 @@ public enum ConfigBuilder {
                 groupOutbounds.append(urltest(region.groupName, members, options))
             }
         }
+        // 按服务分流: each routed service gets its own fastest-node group (tested only while used).
+        var serviceOutbound: [Service: String] = [:]
+        for service in options.routedServices {
+            let target = options.serviceTargets[service.rawValue] ?? Service.follow
+            if target == Service.direct { serviceOutbound[service] = Groups.direct; continue }
+            guard !primaryTags.isEmpty else { continue }
+            var members: [String]
+            if target == Service.noHK {
+                members = realPrimary.filter { Region.of($0.name)?.code != "HK" }.map(\.name)
+            } else {
+                members = realPrimary.filter { Region.of($0.name)?.code == target }.map(\.name)
+            }
+            if members.isEmpty { members = primaryTags } // no node there: fall back to all
+            groupOutbounds.append(urltest(service.groupName, members, options))
+            serviceOutbound[service] = service.groupName
+        }
         var selectorMembers: [String] = []
         if !primaryTags.isEmpty {
             selectorMembers.append(Groups.auto)
@@ -140,6 +215,9 @@ public enum ConfigBuilder {
         ]
         if !options.directDomains.isEmpty { dnsRules.append(["domain_suffix": strings(options.directDomains), "server": "dns-local"]) }
         if !options.proxyDomains.isEmpty { dnsRules.append(["domain_suffix": strings(options.proxyDomains), "server": "dns-remote"]) }
+        for service in options.routedServices where serviceOutbound[service] != nil && serviceOutbound[service] != Groups.direct {
+            dnsRules.append(["rule_set": [.string(service.ruleSet.tag)], "server": "dns-remote"])
+        }
         dnsRules += [
             ["rule_set": [.string(RuleSet.geositeCN.tag)], "server": "dns-local"],
             ["rule_set": [.string(RuleSet.geositeNotCN.tag)], "server": "dns-remote"],
@@ -169,6 +247,10 @@ public enum ConfigBuilder {
             rules.append(["domain_suffix": strings(options.proxyDomains), "outbound": .string(Groups.select)])
         }
         if options.blockAds { rules.append(["rule_set": [.string(RuleSet.ads.tag)], "action": "reject"]) }
+        for service in options.routedServices {
+            guard let outbound = serviceOutbound[service] else { continue }
+            rules.append(["rule_set": [.string(service.ruleSet.tag)], "outbound": .string(outbound)])
+        }
         rules += [
             ["rule_set": [.string(RuleSet.geositeCN.tag)], "outbound": .string(Groups.direct)],
             ["rule_set": [.string(RuleSet.geositeNotCN.tag)], "outbound": .string(Groups.select)],
@@ -178,7 +260,8 @@ public enum ConfigBuilder {
         }
         rules.append(["rule_set": [.string(RuleSet.geoipCN.tag)], "outbound": .string(Groups.direct)])
 
-        let usedRuleSets = RuleSet.all.filter { options.blockAds || $0 != RuleSet.ads }
+        var usedRuleSets = [RuleSet.geositeCN, .geositeNotCN, .geoipCN] + (options.blockAds ? [RuleSet.ads] : [])
+        usedRuleSets += options.routedServices.filter { serviceOutbound[$0] != nil }.map(\.ruleSet)
         let ruleSets: [JSONValue] = usedRuleSets.map { set in
             ["type": "local", "tag": .string(set.tag), "format": "binary", "path": .string(join(options.rulesDirectory, set.file))]
         }
@@ -214,7 +297,8 @@ public enum ConfigBuilder {
         ]
         var built = BuiltConfig(json: config, nodeTags: realTags, nodeOffset: nodeOffset,
                                 groups: [Groups.select] + (primaryTags.isEmpty ? [] : [Groups.auto]) + regionNames
-                                    + (backupTags.isEmpty ? [] : [Groups.backup]))
+                                    + (backupTags.isEmpty ? [] : [Groups.backup])
+                                    + options.routedServices.compactMap { serviceOutbound[$0] == $0.groupName ? $0.groupName : nil })
         built.backupTags = backupTags
         built.nodeProtocols = Dictionary(realNodes.map { ($0.name, $0.protocolLabel) }, uniquingKeysWith: { first, _ in first })
         return built
