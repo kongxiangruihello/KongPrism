@@ -38,6 +38,12 @@ final class CoreManager: @unchecked Sendable {
     func syncTunCoreIfNeeded() throws {
         guard let binary = binary(), let wanted = version(of: binary) else { return }
         let rootCore = URL(fileURLWithPath: TunHelper.corePath)
+        if !TunHelper.isHelperCurrent {
+            // The root helper script changed with this version (0.9: open-file limit, waiting on stop).
+            AppLog.write("增强模式辅助程序有新版本，重新安装")
+            try TunHelper.install(core: binary)
+            return
+        }
         if version(of: rootCore) != wanted {
             AppLog.write("增强模式内核副本与当前内核（\(wanted)）不一致，更新副本")
             try TunHelper.refreshCore(from: binary)

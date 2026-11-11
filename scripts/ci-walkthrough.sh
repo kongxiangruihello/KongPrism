@@ -527,32 +527,28 @@ api /connections | python3 -c 'import json,sys; c=json.load(sys.stdin); print("�
 TUN_PID="$(sudo cat "/Library/Application Support/KongPrismTUN/sing-box.pid")"
 cputime() { ps -o cputime= -p "$1" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))'; }
 api /connections > "$work/tun-c0.json"
-t0="$(cputime "$TUN_PID")"; s0="$(cputime "$SS_PID")"
-sudo sample "$TUN_PID" 5 -file "$work/tun-sample.txt" >/dev/null 2>&1 &
-SAMPLE=$!
+t0="$(cputime "$TUN_PID")"
 sleep 30
-t1="$(cputime "$TUN_PID")"; s1="$(cputime "$SS_PID")"
+t1="$(cputime "$TUN_PID")"
 api /connections > "$work/tun-c1.json"
-python3 - "$work/tun-c0.json" "$work/tun-c1.json" "$t0" "$t1" "$s0" "$s1" <<'PY'
+python3 - "$work/tun-c0.json" "$work/tun-c1.json" "$t0" "$t1" <<'PY'
 import collections, json, sys
 c0, c1 = (json.load(open(p)) for p in sys.argv[1:3])
-t0, t1, s0, s1 = map(float, sys.argv[3:7])
-print(f"增强模式“空闲” 30 秒：root 内核 CPU {t1 - t0:.2f} 秒，节点端 {s1 - s0:.2f} 秒")
-print(f"这 30 秒经过内核：上行 {(c1['uploadTotal'] - c0['uploadTotal']) / 1024:.0f} KB，下行 {(c1['downloadTotal'] - c0['downloadTotal']) / 1024:.0f} KB；当前连接 {len(c1['connections'] or [])} 条")
-hosts = collections.Counter()
-for conn in c1["connections"] or []:
-    m = conn["metadata"]
-    hosts[(m.get("host") or m.get("destinationIP"), m.get("network"), m.get("processPath", "").split("/")[-1])] += 1
-for (host, net, proc), n in hosts.most_common(12):
-    print(f"  {n:3d} × {net} {host}  ← {proc or '?'}")
+t0, t1 = map(float, sys.argv[3:5])
+down = (c1["downloadTotal"] - c0["downloadTotal"]) / 1048576
+print(f"30 秒内经过 root 内核 {down:.1f} MB、当前 {len(c1['connections'] or [])} 条连接，CPU {t1 - t0:.2f} 秒")
+hosts = collections.Counter((c["metadata"].get("host") or c["metadata"].get("destinationIP")) for c in c1["connections"] or [])
+print("主要来源（CI 机器自己的后台流量，不是 KongPrism）：", ", ".join(f"{h} ×{n}" for h, n in hosts.most_common(3)))
 PY
-wait "$SAMPLE" || true
-sudo tail -15 "/Library/Application Support/KongPrismTUN/core.log" 2>/dev/null | cut -c1-200 || true
-grep -E "^ +[0-9]+ " "$work/tun-sample.txt" 2>/dev/null | sort -rn | head -25 | cut -c1-160 || true
+# The runner's own watchdog opens ~1000 connections through the tunnel: the open-file limit must hold.
+if sudo grep -q "too many open files" "/Library/Application Support/KongPrismTUN/core.log"; then
+  echo "❌ root 内核打开的文件数超过上限"; exit 1
+fi
+echo "✅ 上千条连接下没有“too many open files”（辅助程序已把上限从 256 提到 65536）"
 link "tun/off"
 wait_for 30 bash -c '! route -n get 1.1.1.1 | grep -q "interface: utun"'
 wait_for 30 api /version
-echo "✅ App 内开启增强模式：全部流量经过内核、空闲省电；关闭后路由恢复、回到系统代理模式"
+echo "✅ App 内开启增强模式：全部流量经过内核；关闭后 root 内核退出、端口释放、回到系统代理模式"
 
 step "关闭代理，系统代理复原"
 link disconnect

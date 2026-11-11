@@ -16,6 +16,8 @@ stop_core() {
     kill "$pid" 2>/dev/null
     for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
     kill -9 "$pid" 2>/dev/null
+    # Only return once it is gone: KongPrism starts the next core on the same ports right after.
+    for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
   fi
   rm -f "$PIDFILE"
 }
@@ -43,6 +45,9 @@ function run(argv) {
 JXA
     /usr/bin/touch "$ROOT/core.log"; /bin/chmod 644 "$ROOT/core.log"
     cd "$ROOT" || exit 6
+    # Every connection of every program is a file here: the default limit (256) runs out with a busy
+    # browser ("too many open files", seen in CI). Raise it for the core.
+    ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true
     nohup "$CORE" run -c "$ROOT/config.json" -D "$ROOT" --disable-color >>"$ROOT/stderr.log" 2>&1 &
     echo $! > "$PIDFILE"; /bin/chmod 644 "$PIDFILE"
     sleep 0.6

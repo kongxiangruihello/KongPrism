@@ -24,6 +24,12 @@ enum TunHelper {
         var errorDescription: String? { message }
     }
 
+    /// The installed helper is the one this version ships (it is root-owned but readable).
+    static var isHelperCurrent: Bool {
+        guard let installed = try? String(contentsOfFile: helperPath, encoding: .utf8), let wanted = try? helperScript else { return true }
+        return installed == wanted
+    }
+
     static var isInstalled: Bool {
         let fm = FileManager.default
         return fm.isExecutableFile(atPath: helperPath) && fm.isExecutableFile(atPath: corePath) && fm.fileExists(atPath: sudoersPath)
