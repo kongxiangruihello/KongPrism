@@ -48,8 +48,8 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 | 规则集 | SagerNet/sing-geosite、sing-geoip（GitHub → jsDelivr 备用） | 文件头 `SRS` | 每周自动 |
 | 订阅 | 机场 | 能解析出节点才替换 | 6 小时 – 3 天，可选 |
 
-**发布新版本**：更新 `CHANGELOG.md`，然后 `git tag v0.2.0 && git push --tags`。
-GitHub Actions 会编译、测试、打包，并发布带 `latest.json` 的 Release，已安装的 KongPrism 随即能检测到。
+**发布新版本**：把 `Resources/Info.plist` 里的 `CFBundleShortVersionString` 改成新版本号，在 `CHANGELOG.md` 写上 `## 新版本号` 一节，推送到 main。
+GitHub Actions 会编译、测试、打包，并发布带 `latest.json` 的 Release（该版本已发布过则跳过），已安装的 KongPrism 随即能检测到。
 
 > 仓库为私有时，App 需要一个 GitHub 令牌才能下载 Release（设置 › 更新 里填写，fine-grained token 只勾选本仓库的 Contents: Read-only）。
 > 把仓库设为公开则无需令牌。

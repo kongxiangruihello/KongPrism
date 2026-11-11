@@ -40,12 +40,22 @@ jobs:
             build/build.log
           if-no-files-found: error
 
+      # A release is published when main carries a version (Resources/Info.plist) that has no
+      # release yet, or when a v* tag is pushed. So releasing = bump the version + CHANGELOG, push.
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          fi
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version 已发布过，跳过"
+            exit 0
+          fi
           zip="build/KongPrism-$version.zip"
           sha="$(cat "$zip.sha256")"
           build="$(git rev-list --count HEAD)"
@@ -61,4 +71,4 @@ jobs:
                     open("latest.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
           PY
           cat latest.json
-          gh release create "$GITHUB_REF_NAME" "$zip" latest.json --title "KongPrism $version" --notes-file notes.md
+          gh release create "v$version" "$zip" latest.json --target "$GITHUB_SHA" --title "KongPrism $version" --notes-file notes.md
