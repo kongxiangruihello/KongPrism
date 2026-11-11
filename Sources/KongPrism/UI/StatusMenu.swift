@@ -256,17 +256,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         var hidden = 0
         // 收藏的节点排在分组之后、其他节点之前。
         let favorites = Set(controller.settings.favoriteNodes)
-        let groups = selector.all.filter { snapshot.groups[$0] != nil || $0 == Groups.direct }
+        // Groups, then favorites, then the other nodes; 直连 last.
+        let groups = selector.all.filter { snapshot.groups[$0] != nil }
         let plain = selector.all.filter { snapshot.groups[$0] == nil && $0 != Groups.direct }
         let favored = plain.filter { favorites.contains($0) }
-        let ordered = groups + favored + plain.filter { !favorites.contains($0) }
+        let ordered = groups + favored + plain.filter { !favorites.contains($0) } + (selector.all.contains(Groups.direct) ? [Groups.direct] : [])
         for name in ordered {
             let isGroup = snapshot.groups[name] != nil
             if controller.settings.hideDeadNodes, !isGroup, name != Groups.direct, snapshot.delays[name] == 0, selector.now != name {
                 hidden += 1
                 continue
             }
-            if !isGroup, !addedSeparator {
+            if !isGroup, !addedSeparator || name == Groups.direct {
                 submenu.addItem(.separator())
                 addedSeparator = true
             }
