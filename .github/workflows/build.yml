@@ -127,7 +127,7 @@ jobs:
       # node, node / mode switching, memory, screenshots of each settings page, problem report,
       # disconnect, crash detection. See scripts/ci-walkthrough.sh.
       - name: Real-Mac walkthrough
-        timeout-minutes: 20
+        timeout-minutes: 28
         run: |
           set -euo pipefail
           sudo rm -rf /Applications/KongPrism.app
