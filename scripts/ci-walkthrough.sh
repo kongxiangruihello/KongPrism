@@ -47,11 +47,15 @@ IP="$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || true)"
 [[ -n "$IP" ]] || IP="$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')"
 echo "本机地址 ${IP}（订阅里不能用 127.0.0.1：那是机场拒绝访问时的占位节点）"
 # download.ci.test → 127.0.0.1 on the "provider" side, so a download can go through the node to the local server.
+# The test node runs on this same Mac: its own outgoing connections are bound to the physical
+# interface, otherwise in enhanced mode the tunnel would capture them and loop them back to itself.
+IFACE="$(route -n get default | awk '/interface:/{print $2}')"
+echo "物理网卡 $IFACE"
 cat > "$work/ss.json" <<JSON
 {"log":{"level":"warn"},
  "dns":{"servers":[{"type":"hosts","tag":"hosts","predefined":{"download.ci.test":["127.0.0.1"]}},{"type":"local","tag":"local"}]},
  "inbounds":[{"type":"shadowsocks","listen":"0.0.0.0","listen_port":$SSPORT,"method":"aes-128-gcm","password":"ci-password"}],
- "outbounds":[{"type":"direct"}],
+ "outbounds":[{"type":"direct","bind_interface":"$IFACE"}],
  "route":{"default_domain_resolver":"local","rules":[{"domain":["download.ci.test"],"action":"resolve","server":"hosts"}]}}
 JSON
 "$CORE" run -c "$work/ss.json" > "$work/ss.log" 2>&1 &
@@ -538,7 +542,8 @@ t0, t1 = map(float, sys.argv[3:5])
 down = (c1["downloadTotal"] - c0["downloadTotal"]) / 1048576
 print(f"30 秒内经过 root 内核 {down:.1f} MB、当前 {len(c1['connections'] or [])} 条连接，CPU {t1 - t0:.2f} 秒")
 hosts = collections.Counter((c["metadata"].get("host") or c["metadata"].get("destinationIP")) for c in c1["connections"] or [])
-print("主要来源（CI 机器自己的后台流量，不是 KongPrism）：", ", ".join(f"{h} ×{n}" for h, n in hosts.most_common(3)))
+print("主要连接：", ", ".join(f"{h} ×{n}" for h, n in hosts.most_common(3)))
+assert t1 - t0 < 3, "增强模式空闲时 root 内核 CPU 过高"
 PY
 # The runner's own watchdog opens ~1000 connections through the tunnel: the open-file limit must hold.
 if sudo grep -q "too many open files" "/Library/Application Support/KongPrismTUN/core.log"; then
