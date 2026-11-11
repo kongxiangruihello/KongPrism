@@ -15,6 +15,16 @@ public enum SubscriptionParser {
         /// Entries that could not be converted (unsupported protocol or transport, malformed).
         public var skipped: Int
         public var skippedReasons: [String]
+
+        /// Providers that refuse a client often still answer with a single fake node
+        /// ("访问受限 REF: …", server 127.0.0.1, port 1). Such a result is a refusal, not a subscription.
+        public var isRefusalPlaceholder: Bool {
+            !nodes.isEmpty && nodes.allSatisfy { node in
+                let server = node.server.lowercased()
+                return ["127.0.0.1", "0.0.0.0", "localhost", "::1", ""].contains(server) || node.port <= 1
+                    || node.name.range(of: "访问受限|禁止访问|拒绝访问|请更新客户端|blocked|forbidden", options: [.regularExpression, .caseInsensitive]) != nil
+            }
+        }
     }
 
     public enum Failure: Error, Equatable, LocalizedError {

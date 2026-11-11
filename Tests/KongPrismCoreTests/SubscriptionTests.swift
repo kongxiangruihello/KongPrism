@@ -148,6 +148,19 @@ final class SubscriptionTests: XCTestCase {
         XCTAssertNil(result.nodes[0].outbound["tag"])
     }
 
+    func testRefusalPlaceholderIsRecognised() throws {
+        let refused = """
+        proxies:
+          - name: "访问受限 REF: 8lKDoTZWp-TvxLu-faniM5_AztrCjbGJdzTAQfsygOWQ"
+            type: trojan
+            server: 127.0.0.1
+            port: 1
+            password: blocked
+        """
+        XCTAssertTrue(try SubscriptionParser.parse(Data(refused.utf8)).isRefusalPlaceholder)
+        XCTAssertFalse(try SubscriptionParser.parse(Data(Self.clashYAML.utf8)).isRefusalPlaceholder)
+    }
+
     func testGarbageFails() {
         XCTAssertThrowsError(try SubscriptionParser.parse(Data("<html>login</html>".utf8)))
         XCTAssertThrowsError(try SubscriptionParser.parse(Data()))

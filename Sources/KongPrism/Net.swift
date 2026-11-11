@@ -64,7 +64,7 @@ enum Net {
         for route in routes {
             var request = URLRequest(url: url)
             for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-            let session = session(route, timeout: timeout)
+            let session = session(route, timeout: timeout, delegate: HeaderKeeper(headers: headers))
             defer { session.finishTasksAndInvalidate() }
             do {
                 let (data, response) = try await session.data(for: request)
@@ -125,6 +125,22 @@ enum Net {
         var hasher = SHA256()
         while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// Re-applies the request's headers on redirects, so a subscription that moves to another
+/// host still sees the client's User-Agent.
+private final class HeaderKeeper: NSObject, URLSessionTaskDelegate {
+    let headers: [String: String]
+    init(headers: [String: String]) { self.headers = headers }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        var redirected = request
+        for (key, value) in headers where key != "Authorization" || request.url?.host == task.originalRequest?.url?.host {
+            redirected.setValue(value, forHTTPHeaderField: key)
+        }
+        completionHandler(redirected)
     }
 }
 
