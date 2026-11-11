@@ -39,6 +39,17 @@ final class AppController: ObservableObject {
     @Published var rulesTask: Job = .idle
     @Published var subscriptionTask: Job = .idle
     @Published private(set) var testing = false
+    /// Exit IP / location, looked up when the menu opens.
+    @Published private(set) var exitInfo: ExitInfo?
+    /// "HK 01 连不上…" when a hand-picked node fails.
+    @Published private(set) var nodeNotice: String?
+    @Published private(set) var speed: (up: Int64, down: Int64) = (0, 0)
+    @Published private(set) var hotKeyRegistered = false
+
+    private var exitFetchedAt: Date?
+    private var exitKey = ""
+    private var nodeFailures: [String: Int] = [:]
+    private let traffic = TrafficMonitor()
 
     let core = CoreManager()
     private var restartAttempts = 0
@@ -82,6 +93,9 @@ final class AppController: ObservableObject {
     func launch() {
         RuleUpdater.installBundledIfMissing()
         CoreManager.killStale()
+        core.tunMode = settings.tunMode
+        // An enhanced-mode core left running by a crash keeps routing everything; stop it unless we reconnect now.
+        if TunHelper.isRunning && !(settings.connectOnLaunch && settings.wasConnected) { TunHelper.stop() }
         // A crash may have left the system proxy pointing at a port nobody serves.
         if SystemProxy.hasBackup || SystemProxy.isPointing(to: settings.mixedPort) {
             try? SystemProxy.restore(port: settings.mixedPort)
@@ -101,12 +115,36 @@ final class AppController: ObservableObject {
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.didWake() }
         }
+        traffic.onUpdate = { [weak self] up, down in self?.speed = (up, down) }
+        applyHotKey()
+        pullFromICloud()
+    }
+
+    func applyHotKey() {
+        if settings.hotKeyEnabled {
+            hotKeyRegistered = HotKey.shared.register { AppController.shared.toggle() }
+            if !hotKeyRegistered { AppLog.write("快捷键 \(HotKey.display) 已被其他应用占用") }
+        } else {
+            HotKey.shared.unregister()
+            hotKeyRegistered = false
+        }
+    }
+
+    /// The speed display streams only while it is switched on and the core runs.
+    func updateSpeedMonitor() {
+        if settings.showSpeed && status.isRunning {
+            if !traffic.isRunning { traffic.start(api: api) }
+        } else {
+            traffic.stop()
+            speed = (0, 0)
+        }
     }
 
     /// Called from applicationWillTerminate: put the network back the way it was.
     func shutdown() {
         if SystemProxy.hasBackup { try? SystemProxy.restore(port: settings.mixedPort) }
         core.stop()
+        TunHelper.stop()
     }
 
     func rescheduleBackgroundWork() { scheduler?.restart() }
@@ -114,11 +152,27 @@ final class AppController: ObservableObject {
     private func didWake() {
         // sing-box follows network changes itself; only repair a core that died while asleep.
         if settings.wasConnected, !core.isRunning, status != .starting { connect() }
+        exitFetchedAt = nil
+        pullFromICloud()
+        Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            await checkSelectedNode()
+        }
     }
 
     // MARK: Connecting
 
-    func toggle() { status.isRunning || status == .starting ? disconnect() : connect() }
+    /// From the menu or the hot key: offers to quit other proxy clients before connecting.
+    func toggle() {
+        if status.isRunning || status == .starting {
+            disconnect()
+            return
+        }
+        Task {
+            guard await OtherClients.resolveBeforeConnecting() else { return }
+            connect()
+        }
+    }
 
     func connect() {
         guard status != .starting else { return }
@@ -131,14 +185,25 @@ final class AppController: ObservableObject {
         restartAttempts = 0
         let nodes = activeNodes()
         let options = settings.coreOptions
-        let setProxy = settings.setSystemProxy
+        let tun = settings.tunMode
+        // In enhanced mode the TUN interface carries the traffic; the system proxy stays untouched.
+        let setProxy = settings.setSystemProxy && !tun
         let port = settings.mixedPort
         let apiPort = settings.apiPort
         let core = core
+        if tun && !TunHelper.isInstalled {
+            fail("增强模式还没有安装辅助程序：请在 设置 › 常规 里重新打开“增强模式”")
+            return
+        }
         Task {
             let outcome: Result<CoreManager.Prepared, Error> = await Shell.background {
                 Result {
                     core.stop()
+                    core.tunMode = tun
+                    if tun {
+                        if SystemProxy.hasBackup { try? SystemProxy.restore(port: port) }
+                        try core.syncTunCoreIfNeeded()
+                    }
                     try core.freePort(port, label: "代理端口")
                     try core.freePort(apiPort, label: "控制端口")
                     let prepared = try core.prepare(nodes: nodes, options: options)
@@ -177,6 +242,9 @@ final class AppController: ObservableObject {
             }
             status = .running
             settings.wasConnected = true
+            exitFetchedAt = nil
+            nodeNotice = nil
+            updateSpeedMonitor()
             await refreshSnapshot()
             // The core remembers the last choice; "直连" may be left over from a time without nodes.
             if snapshot.groups[Groups.select]?.now == Groups.direct, !settings.userChoseDirect, snapshot.groups[Groups.auto] != nil {
@@ -188,6 +256,9 @@ final class AppController: ObservableObject {
     func disconnect() {
         settings.wasConnected = false
         status = .stopped
+        exitInfo = nil
+        nodeNotice = nil
+        updateSpeedMonitor()
         let port = settings.mixedPort
         let core = core
         Task {
@@ -222,6 +293,13 @@ final class AppController: ObservableObject {
     private func fail(_ message: String) {
         AppLog.write("连接失败：\(message)")
         status = .failed(message)
+        updateSpeedMonitor()
+    }
+
+    /// The enhanced-mode core runs as root, outside KongPrism's process; notice when it is gone.
+    func verifyCoreAlive() {
+        guard status.isRunning, !core.isRunning else { return }
+        fail(settings.tunMode ? "增强模式的内核已退出，请重新开启代理" : "内核已退出，请重新开启代理")
     }
 
     private func coreExited(_ code: Int32) {
@@ -253,6 +331,9 @@ final class AppController: ObservableObject {
 
     func select(_ name: String, in group: String) {
         if group == Groups.select { settings.userChoseDirect = (name == Groups.direct) }
+        nodeFailures[name] = 0
+        nodeNotice = nil
+        exitFetchedAt = nil
         Task {
             do {
                 try await api.select(name, in: group)
@@ -265,6 +346,7 @@ final class AppController: ObservableObject {
 
     func setMode(_ mode: String) {
         settings.mode = mode
+        exitFetchedAt = nil
         guard status.isRunning else { return }
         Task {
             try? await api.setMode(mode)
@@ -283,6 +365,47 @@ final class AppController: ObservableObject {
         }
     }
 
+    /// Tests a hand-picked node (groups test themselves). After two failures in a row it switches
+    /// back to 自动选择 when 自动切换 is on, otherwise shows a notice. Runs only on menu open, wake
+    /// and a rare background check, never on a timer of its own.
+    func checkSelectedNode() async {
+        guard status.isRunning else { return }
+        await refreshSnapshot()
+        guard let current = snapshot.groups[Groups.select]?.now, current != Groups.direct,
+              snapshot.groups[current] == nil, snapshot.groups[Groups.auto] != nil else {
+            nodeNotice = nil
+            return
+        }
+        let delay = (try? await api.testProxy(current, url: settings.testURL, timeoutMs: 5000)) ?? 0
+        if delay > 0 {
+            nodeFailures[current] = 0
+            nodeNotice = nil
+            return
+        }
+        let failures = (nodeFailures[current] ?? 0) + 1
+        nodeFailures[current] = failures
+        if failures >= 2 && settings.autoFailover {
+            AppLog.write("节点 \(current) 连续 \(failures) 次测试失败，切回自动选择")
+            try? await api.select(Groups.auto, in: Groups.select)
+            settings.userChoseDirect = false
+            nodeFailures[current] = 0
+            exitFetchedAt = nil
+            await refreshSnapshot()
+            nodeNotice = "\(current) 连不上，已切回自动选择"
+        } else {
+            nodeNotice = "\(current) 刚才测试连不上"
+        }
+    }
+
+    func refreshExitInfoIfNeeded() async {
+        guard status.isRunning else { exitInfo = nil; return }
+        let key = "\(settings.mode)|\(snapshot.groups[Groups.select]?.now ?? "")|\(snapshot.groups[snapshot.groups[Groups.select]?.now ?? ""]?.now ?? "")"
+        if key == exitKey, let fetched = exitFetchedAt, Date().timeIntervalSince(fetched) < 300 { return }
+        exitKey = key
+        exitFetchedAt = Date()
+        exitInfo = await ExitLookup.fetch(port: settings.mixedPort)
+    }
+
     func copyShellExports() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(ShellExports.command(port: settings.mixedPort), forType: .string)
@@ -290,7 +413,130 @@ final class AppController: ObservableObject {
 
     // MARK: Profiles
 
-    private func saveProfiles() { Store.save(profiles, to: Paths.profiles) }
+    private func saveProfiles() {
+        Store.save(profiles, to: Paths.profiles)
+        pushToICloud()
+    }
+
+    /// Custom rules changed here (for iCloud sync, the newer side wins).
+    func rulesChanged() {
+        settings.rulesChangedAt = Date()
+        pushToICloud()
+    }
+
+    // MARK: iCloud
+
+    private var pushTask: Task<Void, Never>?
+
+    /// Writes subscriptions and rules to iCloud Drive (debounced).
+    func pushToICloud() {
+        guard settings.iCloudSync, ICloudSync.isAvailable else { return }
+        pushTask?.cancel()
+        pushTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            let entries = profiles.map { profile in
+                ICloudSync.Payload.Entry(id: profile.id, name: profile.name, url: profile.url, userAgent: profile.userAgent,
+                                         workingUserAgent: profile.workingUserAgent,
+                                         nodes: profile.isRemote ? nil : Store.loadNodes(profile.id))
+            }
+            let payload = ICloudSync.Payload(updatedAt: Date(), device: ICloudSync.deviceName, profiles: entries,
+                                             directDomains: settings.directDomains, proxyDomains: settings.proxyDomains,
+                                             rulesChangedAt: settings.rulesChangedAt)
+            do {
+                try ICloudSync.write(payload)
+                settings.lastSyncRead = Date()
+            } catch {
+                AppLog.write("写入 iCloud 云盘失败：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Adds subscriptions found in iCloud Drive and takes newer custom rules. Never deletes.
+    func pullFromICloud() {
+        guard settings.iCloudSync, let payload = ICloudSync.read() else { return }
+        if let last = settings.lastSyncRead, payload.updatedAt <= last { return }
+        settings.lastSyncRead = Date()
+        var added: [UUID] = []
+        for entry in payload.profiles {
+            let known = profiles.contains { $0.id == entry.id || (entry.url != nil && $0.url == entry.url) }
+            guard !known else { continue }
+            var profile = Profile(id: entry.id, name: entry.name)
+            profile.url = entry.url
+            profile.userAgent = entry.userAgent
+            profile.workingUserAgent = entry.workingUserAgent
+            if let nodes = entry.nodes {
+                Store.saveNodes(nodes, for: profile.id)
+                profile.nodeCount = nodes.count
+                profile.updatedAt = Date()
+            }
+            profiles.append(profile)
+            added.append(profile.id)
+        }
+        if let remoteRules = payload.rulesChangedAt, remoteRules > (settings.rulesChangedAt ?? .distantPast) {
+            settings.directDomains = payload.directDomains
+            settings.proxyDomains = payload.proxyDomains
+            settings.rulesChangedAt = remoteRules
+            reloadIfRunning()
+        }
+        guard !added.isEmpty else { return }
+        Store.save(profiles, to: Paths.profiles)
+        AppLog.write("从 iCloud 云盘（\(payload.device)）同步了 \(added.count) 个订阅")
+        subscriptionTask = .done("从 iCloud 云盘同步了 \(added.count) 个订阅")
+        Task { for id in added { try? await updateProfile(id) } }
+    }
+
+    // MARK: Enhanced mode
+
+    /// Turns enhanced mode (TUN) on or off; the first time it installs the helper (administrator password).
+    func setTunMode(_ on: Bool) {
+        guard on != settings.tunMode else { return }
+        if on && !TunHelper.isInstalled {
+            guard let binary = core.binary() else { coreTask = .failed("找不到内核"); return }
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "安装增强模式（TUN）？"
+            alert.informativeText = "增强模式会接管所有程序的流量（包括终端和不遵守系统代理的软件），需要以管理员身份安装一个辅助程序，之后开关不再需要密码。\n\n它比系统代理模式更耗电一些；随时可以在这里关闭或移除。"
+            alert.addButton(withTitle: "安装")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { objectWillChange.send(); return }
+            do {
+                try TunHelper.install(core: binary)
+            } catch {
+                coreTask = .failed("安装失败：\(error.localizedDescription)")
+                objectWillChange.send()
+                return
+            }
+        }
+        let wasRunning = status.isRunning
+        if wasRunning {
+            // Stop the current core (and system proxy) before switching modes.
+            let port = settings.mixedPort
+            let core = core
+            status = .stopped
+            Task {
+                await Shell.background {
+                    if SystemProxy.hasBackup { try? SystemProxy.restore(port: port) }
+                    core.stop()
+                }
+                settings.tunMode = on
+                connect()
+            }
+        } else {
+            settings.tunMode = on
+        }
+    }
+
+    func uninstallTunHelper() {
+        do {
+            if settings.tunMode { setTunMode(false) }
+            try TunHelper.uninstall()
+            coreTask = .done("已移除增强模式辅助程序")
+        } catch {
+            coreTask = .failed(error.localizedDescription)
+        }
+        objectWillChange.send()
+    }
 
     /// Nodes of the selected profile, or of all profiles when merging is on.
     func activeNodes() -> [ProxyNode] {
@@ -387,7 +633,8 @@ final class AppController: ObservableObject {
         guard let profile = profiles.first(where: { $0.id == id }), let url = profile.url else { return }
         subscriptionTask = .working("正在更新 \(profile.name)…", nil)
         do {
-            let fetched = try await SubscriptionFetcher.fetch(url: url, userAgent: profile.userAgent, routes: directFirst)
+            let fetched = try await SubscriptionFetcher.fetch(url: url, userAgent: profile.userAgent, remembered: profile.workingUserAgent,
+                                                              routes: directFirst)
             let changed = Store.loadNodes(id) != fetched.result.nodes
             Store.saveNodes(fetched.result.nodes, for: id)
             if let index = profiles.firstIndex(where: { $0.id == id }) {
@@ -397,6 +644,7 @@ final class AppController: ObservableObject {
                 profiles[index].usage = fetched.usage ?? profiles[index].usage
                 profiles[index].updatedAt = Date()
                 profiles[index].lastError = nil
+                profiles[index].workingUserAgent = fetched.agent
                 if nameIfDefault, let name = fetched.suggestedName, !name.isEmpty { profiles[index].name = name }
             }
             saveProfiles()

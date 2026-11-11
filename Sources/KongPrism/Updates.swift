@@ -9,6 +9,8 @@ enum SubscriptionFetcher {
         let result: SubscriptionParser.Result
         let usage: SubscriptionUsage?
         let suggestedName: String?
+        /// The User-Agent the provider accepted.
+        let agent: String
     }
 
     /// Providers decide the format by User-Agent, and many only answer clients they know
@@ -30,7 +32,7 @@ enum SubscriptionFetcher {
         return ["Clash.Meta", first] + agents.filter { $0 != first && $0 != "Clash.Meta" }
     }
 
-    static func fetch(url: String, userAgent: String?, routes: [Net.Route]) async throws -> Fetched {
+    static func fetch(url: String, userAgent: String?, remembered: String? = nil, routes: [Net.Route]) async throws -> Fetched {
         guard let address = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
               address.scheme == "http" || address.scheme == "https" else {
             throw CoreManager.CoreError("订阅地址无效")
@@ -39,7 +41,11 @@ enum SubscriptionFetcher {
         var usage: SubscriptionUsage?
         var name: String?
         var refusals = 0
-        let candidates = userAgent.flatMap { $0.isEmpty ? nil : [$0] + agents(for: address).filter { $0 != userAgent } } ?? agents(for: address)
+        // The user's own choice first, then the one that worked last time, then the usual list.
+        var candidates: [String] = []
+        for agent in [userAgent, remembered].compactMap({ $0 }) + agents(for: address) where !agent.isEmpty && !candidates.contains(agent) {
+            candidates.append(agent)
+        }
         for agent in candidates {
             do {
                 let (data, response) = try await Net.get(address, headers: headers(agent: agent, url: address), routes: routes, timeout: 20)
@@ -54,7 +60,7 @@ enum SubscriptionFetcher {
                     continue
                 }
                 AppLog.write("订阅 \(address.host ?? "")：\(result.format.rawValue)，\(result.nodes.count) 个节点（UA \(agent)）")
-                return Fetched(result: result, usage: usage, suggestedName: name)
+                return Fetched(result: result, usage: usage, suggestedName: name, agent: agent)
             } catch let error as Net.HTTPError {
                 lastError = error
                 if error.status == 403 || error.status == 401 { refusals += 1 }

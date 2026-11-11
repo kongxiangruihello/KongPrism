@@ -99,6 +99,14 @@ struct ClashAPI {
         return result
     }
 
+    /// Delay of one outbound in ms; throws when it fails.
+    func testProxy(_ name: String, url: String, timeoutMs: Int = 5000) async throws -> Int {
+        let data = try await request("/proxies/\(Self.escape(name))/delay?url=\(Self.escape(url))&timeout=\(timeoutMs)",
+                                     timeout: Double(timeoutMs) / 1000 + 3)
+        guard let delay = JSONValue.parse(data)?["delay"]?.intValue, delay > 0 else { throw CoreManager.CoreError("超时") }
+        return delay
+    }
+
     /// Closes open connections (after switching nodes or modes).
     func closeConnections() async {
         _ = try? await request("/connections", method: "DELETE")

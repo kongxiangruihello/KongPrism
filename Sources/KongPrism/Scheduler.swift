@@ -20,6 +20,10 @@ final class Scheduler {
             guard controller.settings.autoUpdateRules else { return }
             await controller.updateRules(userInitiated: false)
         }
+        // Only does anything while a hand-picked node is selected (groups test themselves).
+        schedule("node-health", every: 15 * 60) { controller in
+            await controller.checkSelectedNode()
+        }
         schedule("updates", every: 24 * 3600) { controller in
             if controller.settings.autoCheckAppUpdates { await controller.checkAppUpdate(userInitiated: false) }
             if controller.settings.autoCheckCoreUpdates { await controller.checkCoreUpdate(userInitiated: false) }

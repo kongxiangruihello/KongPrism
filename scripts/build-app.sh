@@ -60,6 +60,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/rules"
 cp "$bin_dir/KongPrism" "$app/Contents/MacOS/KongPrism"
 cp "$core" "$app/Contents/MacOS/sing-box"
 cp "$root"/Resources/rules/*.srs "$app/Contents/Resources/rules/"
+cp "$root/Resources/tun-helper.sh" "$app/Contents/Resources/tun-helper.sh"
 cp "$root/Resources/Info.plist" "$app/Contents/Info.plist"
 cp "$root/LICENSE-sing-box.txt" "$app/Contents/Resources/" 2>/dev/null || true
 build_number="$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)"

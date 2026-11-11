@@ -36,14 +36,16 @@ enum Diagnostics {
 
         // 3. System proxy
         let current = systemProxyDescription()
-        if !settings.setSystemProxy {
+        if settings.tunMode {
+            lines.append(Line(ok: nil, text: "增强模式不使用系统代理。当前系统代理：\(current)"))
+        } else if !settings.setSystemProxy {
             lines.append(Line(ok: nil, text: "未让 KongPrism 设置系统代理（设置 › 常规）。当前系统代理：\(current)"))
         } else if SystemProxy.isPointing(to: port) {
             lines.append(Line(ok: true, text: "系统代理指向 KongPrism（127.0.0.1:\(port)）"))
         } else {
             lines.append(Line(ok: false, text: "系统代理没有指向 KongPrism，当前是：\(current)"))
         }
-        if hasTunDefaultRoute() {
+        if hasTunDefaultRoute() && !settings.tunMode {
             lines.append(Line(ok: false, text: "发现有 TUN 网卡接管默认路由（通常是另一个代理软件的增强/TUN 模式）"))
         }
 
@@ -106,7 +108,11 @@ enum Diagnostics {
         }
 
         // 7. Recent core errors
-        if let log = try? String(contentsOf: Paths.coreLog, encoding: .utf8) {
+        if settings.tunMode {
+            lines.append(Line(ok: TunHelper.isInstalled ? nil : false,
+                              text: TunHelper.isInstalled ? "增强模式（TUN）已开启" : "增强模式已开启，但辅助程序没有安装"))
+        }
+        if let log = try? String(contentsOf: controller.core.logURL, encoding: .utf8) {
             let errors = log.split(whereSeparator: \.isNewline).filter { $0.contains("ERROR") || $0.contains("FATAL") }.suffix(5)
             for line in errors { lines.append(Line(ok: nil, text: "内核日志：" + CheckError.readable(String(line)))) }
         }
@@ -130,9 +136,42 @@ enum Diagnostics {
             alert.informativeText = report
             alert.addButton(withTitle: "好")
             alert.addButton(withTitle: "复制报告")
-            if alert.runModal() == .alertSecondButtonReturn {
+            alert.addButton(withTitle: "导出脱敏订阅样本…")
+            switch alert.runModal() {
+            case .alertSecondButtonReturn:
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(header + "\n" + report, forType: .string)
+            case .alertThirdButtonReturn:
+                exportSample(controller: controller)
+            default:
+                break
+            }
+        }
+    }
+
+    /// Downloads the current subscription again and saves it with every secret replaced,
+    /// so it can be sent to the developer and kept as a regression test.
+    static func exportSample(controller: AppController) {
+        guard let profile = controller.selectedProfile, let address = profile.url.flatMap(URL.init(string:)) else {
+            controller.subscriptionTask = .failed("当前订阅不是链接订阅，无法导出")
+            return
+        }
+        Task {
+            let agent = profile.workingUserAgent ?? profile.userAgent ?? SubscriptionFetcher.agents[0]
+            do {
+                let (data, _) = try await Net.get(address, headers: SubscriptionFetcher.headers(agent: agent, url: address),
+                                                  routes: controller.directFirst, timeout: 20)
+                let text = SubscriptionSample.anonymize(String(decoding: data, as: UTF8.self))
+                NSApp.activate(ignoringOtherApps: true)
+                let panel = NSSavePanel()
+                panel.message = "已去掉服务器地址、密码、UUID 和密钥，只保留结构，可放心发送"
+                panel.nameFieldStringValue = "KongPrism-订阅样本.yaml"
+                panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                try text.write(to: url, atomically: true, encoding: .utf8)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                controller.subscriptionTask = .failed("导出失败：\(error.localizedDescription)")
             }
         }
     }

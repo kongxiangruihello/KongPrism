@@ -21,6 +21,22 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         item.button?.toolTip = "KongPrism"
         updateIcon()
         controller.$status.receive(on: RunLoop.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &cancellables)
+        controller.$speed.receive(on: RunLoop.main).sink { [weak self] _ in self?.updateSpeed() }.store(in: &cancellables)
+    }
+
+    /// "↓1.2M ↑30K" beside the icon while the speed display is on.
+    private func updateSpeed() {
+        guard let button = item.button else { return }
+        if controller.settings.showSpeed && controller.status.isRunning {
+            item.length = NSStatusItem.variableLength
+            let text = "↓\(SpeedText.compact(controller.speed.down)) ↑\(SpeedText.compact(controller.speed.up))"
+            button.attributedTitle = NSAttributedString(string: " " + text, attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .baselineOffset: 1])
+            button.imagePosition = .imageLeft
+        } else if item.length != NSStatusItem.squareLength {
+            button.attributedTitle = NSAttributedString(string: "")
+            item.length = NSStatusItem.squareLength
+        }
     }
 
     private func updateIcon() {
@@ -34,11 +50,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     // MARK: NSMenuDelegate
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        controller.verifyCoreAlive()
         build()
         guard controller.status.isRunning else { return }
         Task {
             await controller.refreshSnapshot()
             build() // while the menu is open, with fresh delays
+            await controller.checkSelectedNode()
+            await controller.refreshExitInfoIfNeeded()
+            build()
         }
     }
 
@@ -55,11 +75,21 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case .stopped: header = "○ 未连接"
         case .failed(let message): header = "⚠︎ \(message)"
         }
-        let headerItem = NSMenuItem(title: header, action: nil, keyEquivalent: "")
+        let headerItem = NSMenuItem(title: header + (controller.settings.tunMode && status.isRunning ? " · 增强模式" : ""), action: nil, keyEquivalent: "")
         headerItem.isEnabled = false
         if case .failed = status { headerItem.attributedTitle = wrapped(header) }
         menu.addItem(headerItem)
-        if status.isRunning, controller.settings.setSystemProxy, !SystemProxy.isPointing(to: controller.settings.mixedPort) {
+        if status.isRunning, let exit = controller.exitInfo {
+            let item = NSMenuItem(title: "出口：" + exit.summary, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        if let notice = controller.nodeNotice {
+            let item = action("⚠︎ " + notice + (notice.contains("已切回") ? "" : "，点此切回自动选择"), #selector(switchToAuto), key: "")
+            item.attributedTitle = NSAttributedString(string: item.title, attributes: [.foregroundColor: NSColor.systemOrange, .font: NSFont.menuFont(ofSize: 0)])
+            menu.addItem(item)
+        }
+        if status.isRunning, controller.settings.setSystemProxy, !controller.settings.tunMode, !SystemProxy.isPointing(to: controller.settings.mixedPort) {
             let item = action("⚠︎ 系统代理被其他软件改掉了，点此重新设置", #selector(reapplyProxy), key: "")
             item.attributedTitle = NSAttributedString(string: item.title, attributes: [.foregroundColor: NSColor.systemOrange, .font: NSFont.menuFont(ofSize: 0)])
             menu.addItem(item)
@@ -83,6 +113,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
 
         let toggle = action(status.isRunning || status == .starting ? "关闭代理" : "开启代理", #selector(toggleConnection), key: "")
+        if controller.hotKeyRegistered {
+            toggle.keyEquivalent = "p"
+            toggle.keyEquivalentModifierMask = [.control, .option]
+        }
         toggle.isEnabled = controller.selectedProfile != nil || status.isRunning
         menu.addItem(toggle)
         if controller.selectedProfile == nil {
@@ -251,6 +285,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func manageProfiles() { openSettings?(.profiles) }
     @objc private func copyExports() { controller.copyShellExports() }
     @objc private func diagnose() { Diagnostics.show(controller: controller) }
+    @objc private func switchToAuto() { controller.select(Groups.auto, in: Groups.select) }
     @objc private func reapplyProxy() { controller.reapplySystemProxy() }
     @objc private func showSettings() { openSettings?(.general) }
     @objc private func showUpdates() { openSettings?(.updates) }

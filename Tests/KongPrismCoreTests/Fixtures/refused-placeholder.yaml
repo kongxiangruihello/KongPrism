@@ -1,0 +1,6 @@
+proxies:
+  - name: "访问受限 REF: 8lKDoTZWp-TvxLu-faniM5_AztrCjbGJdzTAQfsygOWQcxSUGBmS3qPw"
+    type: trojan
+    server: 127.0.0.1
+    port: 1
+    password: blocked

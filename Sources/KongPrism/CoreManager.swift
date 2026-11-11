@@ -18,13 +18,30 @@ final class CoreManager: @unchecked Sendable {
 
     private var process: Process?
     private var stopping = false
+    /// Enhanced mode: the core runs as root through TunHelper instead of as a child process.
+    var tunMode = false
     private let lock = NSLock()
     /// Called on the main queue when sing-box exits without being asked to.
     var onUnexpectedExit: ((Int32) -> Void)?
 
     var isRunning: Bool {
+        if tunMode { return TunHelper.isRunning }
         lock.lock(); defer { lock.unlock() }
         return process?.isRunning == true
+    }
+
+    /// The log the running core writes.
+    var logURL: URL { tunMode ? TunHelper.coreLog : Paths.coreLog }
+
+    /// Enhanced mode runs a root-owned copy of the core; replace it (administrator password)
+    /// when it differs from the core KongPrism uses, e.g. after a core update.
+    func syncTunCoreIfNeeded() throws {
+        guard let binary = binary(), let wanted = version(of: binary) else { return }
+        let rootCore = URL(fileURLWithPath: TunHelper.corePath)
+        if version(of: rootCore) != wanted {
+            AppLog.write("增强模式内核副本与当前内核（\(wanted)）不一致，更新副本")
+            try TunHelper.refreshCore(from: binary)
+        }
     }
 
     // MARK: Binary
@@ -82,6 +99,13 @@ final class CoreManager: @unchecked Sendable {
     // MARK: Process
 
     func start() throws {
+        if tunMode {
+            stop()
+            trimLog()
+            try TunHelper.start()
+            AppLog.write("增强模式内核已启动")
+            return
+        }
         guard let binary = binary() else { throw CoreError("找不到 sing-box 内核") }
         stop()
         Self.killStale()
@@ -120,6 +144,8 @@ final class CoreManager: @unchecked Sendable {
 
     /// Stops sing-box: SIGTERM, then SIGKILL after two seconds.
     func stop() {
+        // A root core from enhanced mode may still run after switching modes.
+        if TunHelper.isRunning { TunHelper.stop() }
         lock.lock()
         guard let process, process.isRunning else { self.process = nil; lock.unlock(); return }
         stopping = true

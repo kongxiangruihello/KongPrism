@@ -287,7 +287,40 @@ struct GeneralView: View {
                 Toggle("登录时自动打开 KongPrism", isOn: Binding(get: { controller.launchAtLogin }, set: { controller.launchAtLogin = $0 }))
                 Toggle("打开时恢复上次的连接状态", isOn: $controller.settings.connectOnLaunch)
                 Toggle("开启代理时设置系统代理", isOn: $controller.settings.setSystemProxy)
+                    .disabled(controller.settings.tunMode)
                 Text("关闭后只运行内核，可在浏览器插件或终端里手动指向 127.0.0.1:\(controller.settings.mixedPort)。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("全局快捷键 \(HotKey.display) 开关代理", isOn: $controller.settings.hotKeyEnabled)
+                    .onChange(of: controller.settings.hotKeyEnabled) { _ in controller.applyHotKey() }
+                if controller.settings.hotKeyEnabled && !controller.hotKeyRegistered {
+                    Text("\(HotKey.display) 已被其他应用占用（例如 KongBabel）。").font(.caption).foregroundStyle(.orange)
+                }
+                Toggle("菜单栏显示网速", isOn: $controller.settings.showSpeed)
+                    .onChange(of: controller.settings.showSpeed) { _ in controller.updateSpeedMonitor() }
+                Text("每秒刷新一次，会多耗一点电；默认关闭。").font(.caption).foregroundStyle(.secondary)
+                Toggle("手选的节点连不上时，自动切回“自动选择”", isOn: $controller.settings.autoFailover)
+            }
+            Section("增强模式（TUN）") {
+                Toggle("接管所有程序的流量", isOn: Binding(get: { controller.settings.tunMode }, set: { controller.setTunMode($0) }))
+                Text("让终端、命令行工具和不遵守系统代理的软件也走代理。首次开启需要管理员密码安装辅助程序；比系统代理模式更耗电，平时用浏览器和普通软件不必开启。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if TunHelper.isInstalled {
+                    HStack {
+                        Text("辅助程序已安装").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("移除辅助程序") { controller.uninstallTunHelper() }
+                    }
+                }
+            }
+            Section("iCloud 云盘同步") {
+                Toggle("在多台 Mac 之间同步订阅和自定义规则", isOn: $controller.settings.iCloudSync)
+                    .disabled(!ICloudSync.isAvailable)
+                    .onChange(of: controller.settings.iCloudSync) { on in
+                        if on { controller.pullFromICloud(); controller.pushToICloud() }
+                    }
+                Text(ICloudSync.isAvailable
+                     ? "保存在 iCloud 云盘 › KongPrism（含订阅链接，不含端口和令牌）。只增不删：在一台 Mac 上删除的订阅，不会从其他 Mac 上删除。"
+                     : "这台 Mac 没有开启 iCloud 云盘（系统设置 › Apple 账户 › iCloud）。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("端口") {
@@ -374,6 +407,7 @@ struct RulesView: View {
                 Button("保存并应用") {
                     controller.settings.directDomains = lines(direct)
                     controller.settings.proxyDomains = lines(proxy)
+                    controller.rulesChanged()
                     controller.reloadIfRunning()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -465,7 +499,7 @@ struct AboutView: View {
             }
             Section("省电设计") {
                 Text("""
-                • 默认用系统代理而非 TUN：只有走代理的应用流量经过内核，CPU 占用最低。
+                • 默认用系统代理而非 TUN：只有走代理的应用流量经过内核，CPU 占用最低；增强模式按需开启。
                 • 节点测速只在分组被使用时进行（idle_timeout），不用时不测。
                 • 菜单只在打开时向内核取数据，后台无轮询、无计时器；订阅、规则、更新检查交给 macOS 统一调度（NSBackgroundActivityScheduler），低电量时自动推迟。
                 • 内核日志级别 warn，不经管道读取；规则集为本地二进制文件，改动后内核自动重载。
@@ -477,6 +511,7 @@ struct AboutView: View {
                     Button("打开数据文件夹") { NSWorkspace.shared.open(Paths.support) }
                     Button("复制终端代理命令") { controller.copyShellExports() }
                     Button("诊断连接…") { Diagnostics.show(controller: controller) }
+                    Button("导出脱敏订阅样本…") { Diagnostics.exportSample(controller: controller) }
                 }
                 Text(ShellExports.command(port: controller.settings.mixedPort)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }

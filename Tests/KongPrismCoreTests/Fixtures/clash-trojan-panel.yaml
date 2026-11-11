@@ -1,0 +1,35 @@
+# 合成样本：常见机场面板（ClashX 订阅）输出的结构——全 Trojan、带分组与规则、有信息条目。
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9090
+dns:
+  enable: true
+  nameserver:
+    - 223.5.5.5
+    - https://doh.pub/dns-query
+proxies:
+  - {name: "剩余流量：186.42 GB", type: trojan, server: server-1.example.com, port: 443, password: redacted, udp: true, sni: sni.example.com, skip-cert-verify: false}
+  - {name: "套餐到期：2027-03-01", type: trojan, server: server-1.example.com, port: 443, password: redacted, udp: true, sni: sni.example.com, skip-cert-verify: false}
+  - {name: "🇭🇰 香港 01", type: trojan, server: server-1.example.com, port: 443, password: redacted, udp: true, sni: sni.example.com, skip-cert-verify: false}
+  - {name: "🇭🇰 香港 02", type: trojan, server: server-2.example.com, port: 8443, password: redacted, udp: true, sni: sni.example.com, skip-cert-verify: true}
+  - {name: "🇯🇵 日本 01", type: trojan, server: server-3.example.com, port: 443, password: redacted, udp: true, sni: sni.example.com, network: ws, ws-opts: {path: /ws, headers: {Host: sni.example.com}}}
+  - {name: "🇺🇸 美国 01 | 0.5x 流量", type: trojan, server: server-4.example.com, port: 443, password: redacted, udp: true, sni: sni.example.com, client-fingerprint: chrome}
+  - {name: "🇸🇬 新加坡 01", type: trojan, server: server-5.example.com, port: 443, password: redacted, udp: true, sni: sni.example.com, network: grpc, grpc-opts: {grpc-service-name: gun}}
+proxy-groups:
+  - name: 🚀 节点选择
+    type: select
+    proxies:
+      - ♻️ 自动选择
+      - 🇭🇰 香港 01
+      - 🇭🇰 香港 02
+  - name: ♻️ 自动选择
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    proxies: [🇭🇰 香港 01, 🇭🇰 香港 02, 🇯🇵 日本 01]
+rules:
+  - DOMAIN-SUFFIX,google.com,🚀 节点选择
+  - GEOIP,CN,DIRECT
+  - MATCH,🚀 节点选择

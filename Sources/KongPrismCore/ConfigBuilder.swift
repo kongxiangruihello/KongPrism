@@ -51,6 +51,8 @@ public struct CoreOptions: Equatable, Sendable {
     public var rulesDirectory = ""
     public var cachePath = ""
     public var regionGroups = true
+    /// Enhanced mode: a TUN interface captures all traffic (needs root; see the app's TUN helper).
+    public var tun = false
     /// Domains always sent direct / always proxied (user rules).
     public var directDomains: [String] = []
     public var proxyDomains: [String] = []
@@ -177,12 +179,7 @@ public enum ConfigBuilder {
         let config: JSONValue = [
             "log": .object(log),
             "dns": dns,
-            "inbounds": [[
-                "type": "mixed",
-                "tag": "mixed-in",
-                "listen": .string(options.allowLAN ? "0.0.0.0" : "127.0.0.1"),
-                "listen_port": .int(options.mixedPort),
-            ]],
+            "inbounds": .array(inbounds(options)),
             "outbounds": .array(outbounds),
             "route": [
                 "rules": .array(rules),
@@ -195,6 +192,26 @@ public enum ConfigBuilder {
         ]
         return BuiltConfig(json: config, nodeTags: realTags, nodeOffset: nodeOffset,
                            groups: [Groups.select] + (realTags.isEmpty ? [] : [Groups.auto]) + regionNames)
+    }
+
+    static func inbounds(_ options: CoreOptions) -> [JSONValue] {
+        var inbounds: [JSONValue] = [[
+            "type": "mixed",
+            "tag": "mixed-in",
+            "listen": .string(options.allowLAN ? "0.0.0.0" : "127.0.0.1"),
+            "listen_port": .int(options.mixedPort),
+        ]]
+        if options.tun {
+            // "mixed" stack: the system TCP stack (cheapest) with gVisor for UDP.
+            inbounds.append([
+                "type": "tun",
+                "tag": "tun-in",
+                "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+                "auto_route": true,
+                "stack": "mixed",
+            ])
+        }
+        return inbounds
     }
 
     static func urltest(_ tag: String, _ members: [String], _ options: CoreOptions) -> JSONValue {

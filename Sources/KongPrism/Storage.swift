@@ -96,6 +96,15 @@ struct AppSettings: Codable, Equatable {
     var directDomains: [String] = []
     var proxyDomains: [String] = []
     var rulesUpdatedAt: Date?
+    /// 0.2 features
+    var tunMode = false
+    var showSpeed = false
+    var hotKeyEnabled = true
+    var autoFailover = true
+    var iCloudSync = false
+    /// When the custom rules last changed here (iCloud sync keeps the newer side).
+    var rulesChangedAt: Date?
+    var lastSyncRead: Date?
     /// Bumped when a default changes for everyone (see the migration in init(from:)).
     var settingsVersion = AppSettings.currentVersion
 
@@ -135,6 +144,13 @@ struct AppSettings: Codable, Equatable {
         directDomains = v(.directDomains, d.directDomains)
         proxyDomains = v(.proxyDomains, d.proxyDomains)
         rulesUpdatedAt = try? c.decodeIfPresent(Date.self, forKey: .rulesUpdatedAt)
+        tunMode = v(.tunMode, d.tunMode)
+        showSpeed = v(.showSpeed, d.showSpeed)
+        hotKeyEnabled = v(.hotKeyEnabled, d.hotKeyEnabled)
+        autoFailover = v(.autoFailover, d.autoFailover)
+        iCloudSync = v(.iCloudSync, d.iCloudSync)
+        rulesChangedAt = try? c.decodeIfPresent(Date.self, forKey: .rulesChangedAt)
+        lastSyncRead = try? c.decodeIfPresent(Date.self, forKey: .lastSyncRead)
         let version = v(.settingsVersion, 1)
         // 0.1.0 resolved unknown domains through the domestic DNS and sent the IP to the
         // proxy, which broke sites with polluted answers; turn that off once for everyone.
@@ -162,6 +178,7 @@ struct AppSettings: Codable, Equatable {
         options.cachePath = Paths.cache.path
         options.directDomains = directDomains
         options.proxyDomains = proxyDomains
+        options.tun = tunMode
         return options
     }
 }
@@ -172,6 +189,8 @@ struct Profile: Codable, Equatable, Identifiable {
     /// nil for nodes pasted in by hand.
     var url: String?
     var userAgent: String?
+    /// The User-Agent the provider last accepted (tried first next time).
+    var workingUserAgent: String?
     var updatedAt: Date?
     var usage: SubscriptionUsage?
     var nodeCount = 0

@@ -31,6 +31,55 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then export KONGPRISM_VERSION="${GITHUB_REF_NAME#v}"; fi
           bash scripts/build-app.sh --test --zip
 
+      # The enhanced-mode helper, exactly as the app installs it, on a real Mac (the runner has
+      # passwordless sudo): root sing-box with a TUN interface, real traffic through it, then stop.
+      - name: Enhanced mode (TUN) end to end
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          app="build/KongPrism.app"
+          helper=/Library/PrivilegedHelperTools/com.kongxiangrui.KongPrism.tun
+          root="/Library/Application Support/KongPrismTUN"
+          runtime="$HOME/Library/Application Support/KongPrism/runtime"
+          mkdir -p "$runtime"
+          python3 - "$runtime/config.json" <<'PY'
+          import json, sys
+          json.dump({
+            "log": {"level": "info", "output": "/tmp/kongprism-must-not-write.log"},
+            "dns": {"servers": [{"type": "udp", "tag": "d", "server": "8.8.8.8"}]},
+            "inbounds": [
+              {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 17899},
+              {"type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"], "auto_route": True, "stack": "mixed"}],
+            "outbounds": [{"type": "direct", "tag": "direct"}],
+            "route": {"auto_detect_interface": True, "final": "direct", "default_domain_resolver": "d",
+                      "rules": [{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}]},
+            "experimental": {"cache_file": {"enabled": True, "path": "/tmp/kongprism-must-not-write.db"},
+                             "clash_api": {"external_controller": "127.0.0.1:19099", "secret": "ci", "external_ui": "/tmp/ui"}}
+          }, open(sys.argv[1], "w"))
+          PY
+          sudo /usr/bin/install -d -m 755 -o root -g wheel /Library/PrivilegedHelperTools "$root"
+          sudo /usr/bin/install -m 755 -o root -g wheel "$app/Contents/Resources/tun-helper.sh" "$helper"
+          sudo /usr/bin/install -m 755 -o root -g wheel "$app/Contents/MacOS/sing-box" /Library/PrivilegedHelperTools/com.kongxiangrui.KongPrism.sing-box
+          echo "$(whoami) ALL=(root) NOPASSWD: $helper start, $helper stop, $helper status" > /tmp/kongprism-sudoers
+          sudo /usr/sbin/visudo -cf /tmp/kongprism-sudoers
+          trap 'sudo "$helper" stop || true; sudo cat "$root/stderr.log" 2>/dev/null | tail -20 || true' EXIT
+
+          sudo "$helper" start
+          test "$(sudo "$helper" status)" = running
+          echo "root config rewritten:"; sudo python3 -c "import json,sys; c=json.load(open(sys.argv[1])); print(c['log']['output'], c['experimental']['cache_file']['path'], 'external_ui' in c['experimental']['clash_api'])" "$root/config.json"
+          sudo python3 -c "import json,sys; c=json.load(open(sys.argv[1])); r=sys.argv[2]; assert c['log']['output']==r+'/core.log' and c['experimental']['cache_file']['path']==r+'/cache.db' and 'external_ui' not in c['experimental']['clash_api']" "$root/config.json" "$root"
+          test ! -e /tmp/kongprism-must-not-write.log
+          sleep 2
+          route -n get 1.1.1.1 | tee /tmp/route.txt
+          grep -q "interface: utun" /tmp/route.txt
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' https://www.apple.com/library/test/success.html)"
+          echo "HTTP $code through TUN"; test "$code" = 200
+          total="$(curl -s -H 'Authorization: Bearer ci' http://127.0.0.1:19099/connections | python3 -c 'import json,sys; print(json.load(sys.stdin)["downloadTotal"])')"
+          echo "bytes through sing-box: $total"; test "$total" -gt 0
+          sudo "$helper" stop
+          test "$(sudo "$helper" status)" = stopped
+          ! route -n get 1.1.1.1 | grep -q "interface: utun"
+
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
