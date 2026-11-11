@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default: break
         }
         CrashRecords.begin(tookOver: tookOver)
+        AppLog.write("敏感信息：\(Secrets.storageDescription)")
         let menu = StatusMenu()
         menu.openSettings = { [weak self] tab in self?.settings.show(tab) }
         URLActions.openSettings = { [weak self] tab in self?.settings.show(tab) }

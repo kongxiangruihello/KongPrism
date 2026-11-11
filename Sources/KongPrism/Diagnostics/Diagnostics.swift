@@ -22,6 +22,8 @@ enum Diagnostics {
         let running = controller.core.isRunning
         lines.append(Line(ok: running, text: running ? "内核正在运行（sing-box \(controller.coreVersion ?? "?")）" : "内核没有运行：\(statusText(controller.status))"))
 
+        lines.append(Line(ok: nil, text: Secrets.storageDescription))
+
         // 1b. Crashes
         let crashes = CrashRecords.recentReports(days: 14)
         if CrashRecords.lastRunEndedAbnormally || !crashes.isEmpty {

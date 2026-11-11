@@ -5,12 +5,29 @@ import Security
 /// keychain instead of the JSON files in Application Support, which backup and sync tools copy
 /// in plain text.
 ///
-/// KongPrism releases are ad-hoc signed, so every update has a different code signature. A
-/// keychain item that trusts only "the app that created it" would make macOS ask for the login
-/// password after every update. The items are therefore created with an access list that lets
-/// any application read them without a prompt — the same reach as the files had, but encrypted
-/// at rest and not copied around in plain text.
+/// Only for a build signed with a Developer ID (a Team ID): macOS ties keychain items to the
+/// signer's partition ("teamid:…"), and an ad-hoc signed build gets a new identity with every
+/// update, so each update would ask for the login password before it could read its own link.
+/// CI showed exactly that (another binary could not read the item without a prompt), so ad-hoc
+/// builds — the current releases — keep the links in profiles.json (permissions 600) as before.
 enum Secrets {
+    /// True when this copy of KongPrism is signed with a Team ID.
+    static let useKeychain: Bool = {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return false }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return false }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let dictionary = info as? [String: Any] else { return false }
+        return (dictionary[kSecCodeInfoTeamIdentifier as String] as? String).map { !$0.isEmpty } ?? false
+    }()
+
+    static var storageDescription: String {
+        useKeychain ? "订阅链接和 GitHub 令牌保存在钥匙串里"
+            : "订阅链接和 GitHub 令牌保存在本机文件里（只有你的账户可读）；这一版没有开发者 ID 签名，改存钥匙串会让每次更新后都要求输入登录密码"
+    }
+
     static let service = "com.kongxiangrui.KongPrism"
     /// What is known to be in the keychain, so settings saves (frequent) do not touch it.
     private static var cache: [String: String] = [:]
@@ -83,7 +100,8 @@ enum Secrets {
 
     /// The profiles as written to profiles.json: links moved to the keychain.
     static func forDisk(_ profiles: [Profile]) -> [Profile] {
-        profiles.map { profile in
+        guard useKeychain else { return profiles.map { var copy = $0; copy.urlInKeychain = nil; return copy } }
+        return profiles.map { profile in
             var copy = profile
             guard let url = profile.url else { copy.urlInKeychain = nil; return copy }
             if set(url, account: subscriptionAccount(profile.id)) {
@@ -111,6 +129,7 @@ enum Secrets {
 
     static func forDisk(_ settings: AppSettings) -> AppSettings {
         var copy = settings
+        guard useKeychain else { copy.githubTokenInKeychain = false; return copy }
         if settings.githubToken.isEmpty {
             if settings.githubTokenInKeychain { delete(githubAccount) }
             copy.githubTokenInKeychain = false

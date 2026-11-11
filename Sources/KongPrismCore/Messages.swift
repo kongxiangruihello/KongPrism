@@ -70,7 +70,7 @@ public enum WhatsNew {
         Item(version: "0.7.0", text: "新版本连续启动失败时，可一键退回上一个版本", tab: "updates"),
         Item(version: "0.7.0", text: "菜单精简：诊断、问题报告等收进“工具”；按服务分流状态在“节点”里", tab: nil),
         Item(version: "0.7.0", text: "问题报告里的日志会把服务器地址换成代号", tab: "updates"),
-        Item(version: "0.8.0", text: "订阅链接和 GitHub 令牌改存在钥匙串里", tab: "profiles"),
+        Item(version: "0.8.0", text: "菜单打开更快；节点测试和出口查询每分钟最多一次，更省电", tab: nil),
         Item(version: "0.8.0", text: "网络一时出错时，订阅 10 分钟后自动重试；出错时间一目了然", tab: "profiles"),
         Item(version: "0.8.0", text: "内核日志轮换保留上一份，节点统计不再因日志清理而中断", tab: "nodes"),
     ]

@@ -147,18 +147,20 @@ APP_PID="$(pgrep -x KongPrism | head -1)"
 sleep 3
 test -f "$SUPPORT/running.marker" && echo "运行标记已创建"
 
-step "订阅链接和 GitHub 令牌移进钥匙串"
-keychain() { perl -e 'alarm 15; exec @ARGV' security find-generic-password -s com.kongxiangrui.KongPrism -a "$1" -w; }
-python3 - "$SUPPORT/profiles.json" "$SUPPORT/settings.json" <<'PY'
-import json, sys
-profiles = json.load(open(sys.argv[1])); settings = json.load(open(sys.argv[2]))
-assert all("url" not in p and p.get("urlInKeychain") for p in profiles), profiles
-assert settings.get("githubToken", "") == "" and settings.get("githubTokenInKeychain"), settings.get("githubToken")
-print("✅ profiles.json / settings.json 里已没有订阅链接和令牌")
-PY
-test "$(keychain "subscription:$PROFILE_ID")" = "http://127.0.0.1:$SUBPORT/sub.yaml"
-test "$(keychain github-token)" = "ci-token-123"
-echo "✅ 钥匙串里有链接和令牌；另一个程序（security）读取时没有弹出密码框——说明更新后的新版本也能直接读取"
+step "订阅链接和令牌的存放方式"
+# Ad-hoc signed (CI and current releases): kept in the files, because the keychain would ask for the
+# password after every update. With a Developer ID signature they move to the keychain.
+wait_for 10 grep -q "敏感信息：" "$SUPPORT/logs/app.log"
+grep "敏感信息：" "$SUPPORT/logs/app.log" | tail -1 | cut -c21-
+if codesign -dv "$APP" 2>&1 | grep -q "TeamIdentifier=not set"; then
+  grep -q "这一版没有开发者 ID 签名" "$SUPPORT/logs/app.log"
+  python3 -c "import json,sys; p=json.load(open(sys.argv[1])); assert p[0]['url'].endswith('/sub.yaml') and not p[0].get('urlInKeychain')" "$SUPPORT/profiles.json"
+  echo "✅ 未用开发者 ID 签名：链接留在本机文件（不会每次更新都要密码）"
+else
+  python3 -c "import json,sys; p=json.load(open(sys.argv[1])); assert 'url' not in p[0] and p[0]['urlInKeychain']" "$SUPPORT/profiles.json"
+  echo "✅ 开发者 ID 签名：链接已移进钥匙串"
+fi
+stat -f "%Sp %N" "$SUPPORT/profiles.json" "$SUPPORT/settings.json"
 
 step "更新订阅"
 link update
