@@ -225,7 +225,7 @@ final class AppController: ObservableObject {
         let apiPort = settings.apiPort
         let core = core
         if tun && !TunHelper.isInstalled {
-            fail("增强模式还没有安装辅助程序：请在 设置 › 常规 里重新打开“增强模式”")
+            fail("增强模式还没有安装辅助程序：请在 设置 › 网络 里重新打开“增强模式”")
             return
         }
         Task {
@@ -983,11 +983,18 @@ final class AppController: ObservableObject {
 
     func updateRules(userInitiated: Bool) async {
         rulesTask = .working("正在更新分流规则…", nil)
-        do {
-            let changed = try await RuleUpdater.update(routes: proxyFirst)
+        var builtIn: Result<Int, Error> = .success(0)
+        do { builtIn = .success(try await RuleUpdater.update(routes: proxyFirst)) } catch { builtIn = .failure(error) }
+        // Custom rule-sets come from other hosts; update them even when GitHub is unreachable.
+        let custom = await refreshCustomRuleSets()
+        switch builtIn {
+        case .success(let changed):
             settings.rulesUpdatedAt = Date()
-            rulesTask = .done(changed > 0 ? "规则已更新（\(changed) 个文件有变化）" : "规则已是最新")
-        } catch {
+            let total = changed + custom.changed
+            var text = total > 0 ? "规则已更新（\(total) 个文件有变化）" : "规则已是最新"
+            if custom.failed > 0 { text += "；\(custom.failed) 个自定义规则集更新失败" }
+            rulesTask = .done(text)
+        case .failure(let error):
             rulesTask = userInitiated ? .failed(error.localizedDescription) : .idle
         }
     }

@@ -437,6 +437,12 @@ enum AppUpdater {
             defaults.set(true, forKey: "declinedMoveToApplications")
             return
         }
+        moveToApplications()
+    }
+
+    /// Copies this bundle to /Applications/KongPrism.app, quits and reopens from there.
+    @MainActor
+    static func moveToApplications() {
         let target = "/Applications/KongPrism.app"
         let source = Bundle.main.bundleURL.path
         let script = """

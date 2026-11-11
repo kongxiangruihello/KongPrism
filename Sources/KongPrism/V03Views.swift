@@ -11,8 +11,10 @@ struct NodesView: View {
     private var nodes: [String] {
         let all = controller.snapshot.groups[Groups.select]?.all ?? []
         let list = all.filter { controller.snapshot.groups[$0] == nil && $0 != Groups.direct }
-        guard sortByDelay else { return list }
-        return list.sorted { a, b in rank(a) < rank(b) }
+        let favorites = Set(controller.settings.favoriteNodes)
+        let sorted = sortByDelay ? list.sorted { a, b in rank(a) < rank(b) } : list
+        // 收藏的节点排在最前（稳定排序，保留延迟顺序）。
+        return sorted.filter { favorites.contains($0) } + sorted.filter { !favorites.contains($0) }
     }
 
     /// Untested last, timeouts after working nodes.
@@ -38,6 +40,12 @@ struct NodesView: View {
                 HStack {
                     Image(systemName: current == name ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(current == name ? Color.accentColor : .secondary)
+                    let favorite = controller.settings.favoriteNodes.contains(name)
+                    Button { controller.toggleFavorite(name) } label: {
+                        Image(systemName: favorite ? "star.fill" : "star").foregroundStyle(favorite ? Color.yellow : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(favorite ? "取消收藏" : "收藏：在菜单里排在最前")
                     Text(name)
                     if controller.backupTags.contains(name) {
                         Text("备用").font(.caption2).padding(.horizontal, 4).background(Color.orange.opacity(0.2)).cornerRadius(3)
@@ -49,7 +57,7 @@ struct NodesView: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { controller.select(name, in: Groups.select) }
             }
-            Text("双击使用该节点。共 \(nodes.count) 个，可用 \(nodes.filter { (controller.snapshot.delays[$0] ?? 0) > 0 }.count) 个。")
+            Text("双击使用该节点；点 ☆ 收藏，收藏的节点在菜单里排在最前。共 \(nodes.count) 个，可用 \(nodes.filter { (controller.snapshot.delays[$0] ?? 0) > 0 }.count) 个。")
                 .font(.caption).foregroundStyle(.secondary)
             GroupBox("备用订阅（故障转移）") {
                 VStack(alignment: .leading, spacing: 6) {

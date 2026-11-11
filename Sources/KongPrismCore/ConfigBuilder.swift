@@ -23,6 +23,15 @@ public struct RuleSet: Equatable, Sendable {
     /// Everything the rule updater keeps fresh; a config declares only the sets it uses.
     public static let all: [RuleSet] = [geositeCN, geositeNotCN, ads, geoipCN, ai, youtube, netflix]
 
+    /// A rule-set from any URL (自定义规则集). `file` ends in .srs (binary) or .json (source).
+    public init(tag: String, file: String, urls: [String]) {
+        self.tag = tag
+        self.file = file
+        self.urls = urls
+    }
+
+    public var format: String { file.hasSuffix(".json") ? "source" : "binary" }
+
     init(tag: String, file: String, repo: String, remote: String) {
         self.tag = tag
         self.file = file
@@ -81,6 +90,16 @@ public enum Service: String, CaseIterable, Codable, Sendable {
     public static var targets: [String] { [follow, noHK] + Region.all.map(\.code) + [direct] }
 }
 
+public struct CustomRule: Equatable, Sendable {
+    public var set: RuleSet
+    /// "direct", "proxy" or "reject"
+    public var target: String
+    public init(set: RuleSet, target: String) {
+        self.set = set
+        self.target = target
+    }
+}
+
 /// Everything that shapes the generated sing-box config.
 public struct CoreOptions: Equatable, Sendable {
     public var mixedPort = 7897
@@ -111,6 +130,9 @@ public struct CoreOptions: Equatable, Sendable {
     public var serviceTargets: [String: String] = [:]
 
     /// Services that get a rule of their own.
+    /// User rule-sets (自定义规则集) with where they send traffic: "direct", "proxy" or "reject".
+    public var customRuleSets: [CustomRule] = []
+
     public var routedServices: [Service] {
         Service.allCases.filter { (serviceTargets[$0.rawValue] ?? Service.follow) != Service.follow }
     }
@@ -246,6 +268,13 @@ public enum ConfigBuilder {
         if !options.proxyDomains.isEmpty {
             rules.append(["domain_suffix": strings(options.proxyDomains), "outbound": .string(Groups.select)])
         }
+        for custom in options.customRuleSets {
+            switch custom.target {
+            case "reject": rules.append(["rule_set": [.string(custom.set.tag)], "action": "reject"])
+            case "direct": rules.append(["rule_set": [.string(custom.set.tag)], "outbound": .string(Groups.direct)])
+            default: rules.append(["rule_set": [.string(custom.set.tag)], "outbound": .string(Groups.select)])
+            }
+        }
         if options.blockAds { rules.append(["rule_set": [.string(RuleSet.ads.tag)], "action": "reject"]) }
         for service in options.routedServices {
             guard let outbound = serviceOutbound[service] else { continue }
@@ -262,8 +291,9 @@ public enum ConfigBuilder {
 
         var usedRuleSets = [RuleSet.geositeCN, .geositeNotCN, .geoipCN] + (options.blockAds ? [RuleSet.ads] : [])
         usedRuleSets += options.routedServices.filter { serviceOutbound[$0] != nil }.map(\.ruleSet)
+        usedRuleSets += options.customRuleSets.map(\.set)
         let ruleSets: [JSONValue] = usedRuleSets.map { set in
-            ["type": "local", "tag": .string(set.tag), "format": "binary", "path": .string(join(options.rulesDirectory, set.file))]
+            ["type": "local", "tag": .string(set.tag), "format": .string(set.format), "path": .string(join(options.rulesDirectory, set.file))]
         }
 
         var log: [String: JSONValue] = ["level": .string(options.logLevel), "timestamp": true]

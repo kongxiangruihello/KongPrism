@@ -11,8 +11,8 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 | 方便导入 | 机场网页“一键导入 Clash / sing-box”直接唤起 KongPrism；打开菜单即识别剪贴板里的订阅地址、节点或二维码截图；拖入文件/链接；从文件导入 |
 | 协议 | Shadowsocks（含 2022、obfs / v2ray-plugin）、VMess、VLESS（Vision / Reality）、Trojan、Hysteria2（端口跳跃）、TUIC、AnyTLS、SOCKS5 |
 | 传输 | TCP、WebSocket（含 early data）、gRPC、HTTP/2、HTTPUpgrade |
-| 分流 | 规则 / 全局 / 直连；国内域名直连、国外域名走代理、未知域名按 IP 归属分流、广告拦截、自定义直连/代理域名 |
-| 节点 | 自动选择最快节点；按地区自动分组；菜单里一键测速、切换 |
+| 分流 | 规则 / 全局 / 直连；国内域名直连、国外域名走代理、未知域名按 IP 归属分流、广告拦截、自定义直连/代理域名；按服务（AI、YouTube、Netflix）指定地区；自定义远程规则集（sing-box / Clash 格式，直连 / 代理 / 拦截） |
+| 节点 | 自动选择最快节点；按地区自动分组；菜单里一键测速、切换；收藏节点排在最前 |
 | 在线更新 | App 本体、sing-box 内核、规则集、订阅，全部可在 App 内更新，下载优先走自身代理 |
 | 其他 | 登录时启动、局域网共享、复制终端代理命令、崩溃后自动恢复系统代理 |
 
@@ -33,9 +33,9 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 - 网页只给了**二维码**：⌃⇧⌘4 截图到剪贴板，再打开菜单，同样会识别。
 - 把 Clash / sing-box 配置文件、二维码图片或订阅链接**拖进**设置 › 订阅 的列表。
 
-第一个订阅添加后会自动开启代理。之后在“节点”子菜单里切换节点或测速；在“出站模式”里切换规则 / 全局 / 直连。
+第一次打开时会出现**新手引导**：添加订阅 → 开启代理 → 验证能打开 Google。
+之后在“节点”子菜单里切换节点或测速（按住 Option 点节点可收藏）；在“出站模式”里切换规则 / 全局 / 直连。
 首次开启可能要求输入管理员密码以修改系统代理。
-3. 在“节点”子菜单里切换节点或测速；在“出站模式”里切换规则 / 全局 / 直连。
 
 终端走代理：菜单 › 复制终端代理命令，粘贴到终端即可。
 
@@ -48,6 +48,10 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 | `kongprism://node/香港` | 切到名称（或包含该文字）的节点 |
 | `kongprism://test` | 全部节点测速 |
 | `kongprism://update` | 更新全部订阅 |
+| `kongprism://rules` | 更新规则集（含自定义远程规则集） |
+| `kongprism://settings/network` | 打开设置的某一页：profiles、nodes、rules、network、stats、general、updates |
+| `kongprism://report` | 生成问题报告（桌面 zip） |
+| `kongprism://onboarding` | 打开新手引导 |
 
 在终端里可以 `open kongprism://toggle`。
 
@@ -58,12 +62,13 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 | KongPrism | 本仓库 GitHub Releases 中的 `latest.json` + zip | SHA-256、签名、Bundle ID | 每天检查，手动安装 |
 | sing-box 内核 | SagerNet/sing-box 官方 Release | 能运行 + 用当前配置 `check` 通过才替换；保留上一个版本可回退 | 每天检查，手动安装 |
 | 规则集 | SagerNet/sing-geosite、sing-geoip（GitHub → jsDelivr 备用） | 文件头 `SRS` | 每周自动 |
+| 自定义规则集 | 你填的地址（sing-box .srs / .json，或 Clash 规则集，自动转换） | `sing-box rule-set match` 能读取才替换 | 随规则集每周自动 |
 | 订阅 | 机场 | 能解析出节点才替换 | 6 小时 – 3 天，可选 |
 
 **发布新版本**：把 `Resources/Info.plist` 里的 `CFBundleShortVersionString` 改成新版本号，在 `CHANGELOG.md` 写上 `## 新版本号` 一节，推送到 main。
 GitHub Actions 会编译、测试、打包，并发布带 `latest.json` 的 Release（该版本已发布过则跳过），已安装的 KongPrism 随即能检测到。
 
-> 仓库现为公开，App 更新无需令牌。若改回私有，需在 设置 › 更新 里填写 GitHub 令牌（fine-grained token，只勾选本仓库的 Contents: Read-only）。
+> 仓库现为公开，App 更新无需令牌。若改回私有，需在 设置 › 更新与关于 里填写 GitHub 令牌（fine-grained token，只勾选本仓库的 Contents: Read-only）。
 
 ## 省电设计
 
@@ -73,6 +78,7 @@ GitHub Actions 会编译、测试、打包，并发布带 `latest.json` 的 Rele
 - 订阅、规则、更新检查交给 `NSBackgroundActivityScheduler`，由 macOS 合并唤醒、低电量时推迟。
 - 内核日志级别 `warn` 并直接写文件；规则集是本地二进制文件，更新后内核自动重载，不必重启。
 - 只在节点真的变化时才重启内核。
+- CI 在真机上测空闲 60 秒的 CPU 时间和内存（App < 200 MB、内核 < 100 MB），超出即构建失败；并用 `scripts/ci-walkthrough.sh` 实际走一遍主要功能、截下设置窗口每一页。
 
 ## 目录
 

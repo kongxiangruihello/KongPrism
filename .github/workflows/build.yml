@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,13 +52,19 @@ jobs:
           a0="$(cpu "$app")"; c0="$(cpu "$core")"
           sleep 60
           a1="$(cpu "$app")"; c1="$(cpu "$core")"
-          python3 - "$a0" "$a1" "$c0" "$c1" <<'PY'
+          # Resident memory (KB) of both processes after a minute of idling.
+          am="$(ps -o rss= -p "$app" | tr -d ' ')"; cm="$(ps -o rss= -p "$core" | tr -d ' ')"
+          python3 - "$a0" "$a1" "$c0" "$c1" "$am" "$cm" <<'PY'
           import sys
-          a0, a1, c0, c1 = map(float, sys.argv[1:])
+          a0, a1, c0, c1, am, cm = map(float, sys.argv[1:])
           app, core = a1 - a0, c1 - c0
           print(f"Idle CPU over 60 s: KongPrism {app:.2f} s ({app/60*100:.2f}%), sing-box {core:.2f} s ({core/60*100:.2f}%)")
+          print(f"Idle memory (RSS): KongPrism {am/1024:.0f} MB, sing-box {cm/1024:.0f} MB")
           assert app < 0.6, "KongPrism uses CPU while idle"
           assert core < 0.6, "sing-box uses CPU while idle"
+          # Thresholds: a menu-bar app with one SwiftUI window open, and an idle core.
+          assert am < 200 * 1024, "KongPrism uses too much memory while idle (limit 200 MB)"
+          assert cm < 100 * 1024, "sing-box uses too much memory while idle (limit 100 MB)"
           PY
           top -l 2 -s 5 -pid "$app" -stats pid,command,cpu,idlew 2>/dev/null | tail -2 || true
           kill "$core" || true
@@ -112,6 +118,29 @@ jobs:
           sudo "$helper" stop
           test "$(sudo "$helper" status)" = stopped
           ! route -n get 1.1.1.1 | grep -q "interface: utun"
+
+      # Every feature on a real Mac: install, subscription, rule-sets, connect, Google through a
+      # node, node / mode switching, memory, screenshots of each settings page, problem report,
+      # disconnect, crash detection. See scripts/ci-walkthrough.sh.
+      - name: Real-Mac walkthrough
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          sudo rm -rf /Applications/KongPrism.app
+          ditto build/KongPrism.app /Applications/KongPrism.app
+          # Only one copy, so kongprism:// links reach the installed app.
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u build/KongPrism.app || true
+          mv build/KongPrism.app "$RUNNER_TEMP/KongPrism-build.app"
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/KongPrism.app
+          SHOTS="$PWD/build/walkthrough" bash scripts/ci-walkthrough.sh
+
+      - name: Upload walkthrough screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walkthrough
+          path: build/walkthrough
+          if-no-files-found: ignore
 
       - name: Upload app
         uses: actions/upload-artifact@v4

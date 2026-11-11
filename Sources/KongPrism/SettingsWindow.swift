@@ -3,7 +3,7 @@ import SwiftUI
 import KongPrismCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case profiles, nodes, general, rules, stats, updates, about
+    case profiles, nodes, rules, network, stats, general, updates
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -11,9 +11,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .nodes: return "节点"
         case .general: return "常规"
         case .rules: return "分流"
+        case .network: return "网络"
         case .stats: return "统计"
-        case .updates: return "更新"
-        case .about: return "关于"
+        case .updates: return "更新与关于"
         }
     }
     var symbol: String {
@@ -22,9 +22,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .nodes: return "point.3.connected.trianglepath.dotted"
         case .general: return "gearshape"
         case .rules: return "arrow.triangle.branch"
+        case .network: return "network"
         case .stats: return "chart.bar"
         case .updates: return "arrow.down.circle"
-        case .about: return "info.circle"
         }
     }
 }
@@ -63,11 +63,12 @@ struct SettingsView: View {
         TabView(selection: $selection.tab) {
             ProfilesView().tabItem { Label(SettingsTab.profiles.title, systemImage: SettingsTab.profiles.symbol) }.tag(SettingsTab.profiles)
             NodesView().tabItem { Label(SettingsTab.nodes.title, systemImage: SettingsTab.nodes.symbol) }.tag(SettingsTab.nodes)
-            GeneralView().tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.symbol) }.tag(SettingsTab.general)
             RulesView().tabItem { Label(SettingsTab.rules.title, systemImage: SettingsTab.rules.symbol) }.tag(SettingsTab.rules)
+            NetworkSettingsView().tabItem { Label(SettingsTab.network.title, systemImage: SettingsTab.network.symbol) }.tag(SettingsTab.network)
             StatsView().tabItem { Label(SettingsTab.stats.title, systemImage: SettingsTab.stats.symbol) }.tag(SettingsTab.stats)
-            UpdatesView().tabItem { Label(SettingsTab.updates.title, systemImage: SettingsTab.updates.symbol) }.tag(SettingsTab.updates)
-            AboutView().tabItem { Label(SettingsTab.about.title, systemImage: SettingsTab.about.symbol) }.tag(SettingsTab.about)
+            GeneralView().tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.symbol) }.tag(SettingsTab.general)
+            Form { UpdatesView(); AboutView() }.formStyle(.grouped)
+                .tabItem { Label(SettingsTab.updates.title, systemImage: SettingsTab.updates.symbol) }.tag(SettingsTab.updates)
         }
         .padding()
         .frame(minWidth: 620, minHeight: 460)
@@ -284,18 +285,14 @@ struct ProfileEditor: View {
 
 struct GeneralView: View {
     @EnvironmentObject var controller: AppController
-    @State private var mixedPort = ""
-    @State private var apiPort = ""
 
     var body: some View {
         Form {
-            Section {
+            Section("启动") {
                 Toggle("登录时自动打开 KongPrism", isOn: Binding(get: { controller.launchAtLogin }, set: { controller.launchAtLogin = $0 }))
                 Toggle("打开时恢复上次的连接状态", isOn: $controller.settings.connectOnLaunch)
-                Toggle("开启代理时设置系统代理", isOn: $controller.settings.setSystemProxy)
-                    .disabled(controller.settings.tunMode)
-                Text("关闭后只运行内核，可在浏览器插件或终端里手动指向 127.0.0.1:\(controller.settings.mixedPort)。")
-                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("菜单栏与快捷键") {
                 Toggle("全局快捷键 \(HotKey.display) 开关代理", isOn: $controller.settings.hotKeyEnabled)
                     .onChange(of: controller.settings.hotKeyEnabled) { _ in controller.applyHotKey() }
                 if controller.settings.hotKeyEnabled && !controller.hotKeyRegistered {
@@ -306,8 +303,39 @@ struct GeneralView: View {
                 Text("每秒刷新一次，会多耗一点电；默认关闭。").font(.caption).foregroundStyle(.secondary)
                 Toggle("使用电池或低电量模式时暂停网速显示", isOn: $controller.settings.pauseSpeedOnBattery)
                     .onChange(of: controller.settings.pauseSpeedOnBattery) { _ in controller.updateSpeedMonitor() }
+            }
+            Section("提醒与自动处理") {
                 Toggle("手选的节点连不上时，自动切回“自动选择”", isOn: $controller.settings.autoFailover)
                 Toggle("订阅快到期或流量快用完时发系统通知", isOn: $controller.settings.usageNotifications)
+            }
+            Section("iCloud 云盘同步") {
+                Toggle("在多台 Mac 之间同步订阅和自定义规则", isOn: $controller.settings.iCloudSync)
+                    .disabled(!ICloudSync.isAvailable)
+                    .onChange(of: controller.settings.iCloudSync) { on in
+                        if on { controller.pullFromICloud(); controller.pushToICloud() }
+                    }
+                Text(ICloudSync.isAvailable
+                     ? "保存在 iCloud 云盘 › KongPrism（含订阅链接，不含端口和令牌）。只增不删：在一台 Mac 上删除的订阅，不会从其他 Mac 上删除。"
+                     : "这台 Mac 没有开启 iCloud 云盘（系统设置 › Apple 账户 › iCloud）。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct NetworkSettingsView: View {
+    @EnvironmentObject var controller: AppController
+    @State private var mixedPort = ""
+    @State private var apiPort = ""
+
+    var body: some View {
+        Form {
+            Section("系统代理") {
+                Toggle("开启代理时设置系统代理", isOn: $controller.settings.setSystemProxy)
+                    .disabled(controller.settings.tunMode)
+                Text("关闭后只运行内核，可在浏览器插件或终端里手动指向 127.0.0.1:\(controller.settings.mixedPort)。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("按网络自动切换") {
                 NetworkRulesView()
@@ -323,17 +351,6 @@ struct GeneralView: View {
                         Button("移除辅助程序") { controller.uninstallTunHelper() }
                     }
                 }
-            }
-            Section("iCloud 云盘同步") {
-                Toggle("在多台 Mac 之间同步订阅和自定义规则", isOn: $controller.settings.iCloudSync)
-                    .disabled(!ICloudSync.isAvailable)
-                    .onChange(of: controller.settings.iCloudSync) { on in
-                        if on { controller.pullFromICloud(); controller.pushToICloud() }
-                    }
-                Text(ICloudSync.isAvailable
-                     ? "保存在 iCloud 云盘 › KongPrism（含订阅链接，不含端口和令牌）。只增不删：在一台 Mac 上删除的订阅，不会从其他 Mac 上删除。"
-                     : "这台 Mac 没有开启 iCloud 云盘（系统设置 › Apple 账户 › iCloud）。")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("端口") {
                 HStack {
@@ -397,7 +414,7 @@ struct RulesView: View {
                 Text("开启后，列表外的域名会先经代理 DNS 解析，国内 IP 直连、其余把 IP 交给节点。一般不必开启。")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("按地区自动分组（香港、日本、美国…）", isOn: $controller.settings.regionGroups)
-                Text("顺序：局域网直连 → 自定义规则 → 国内域名直连 → 国外域名走代理 →（可选）国内 IP 直连 → 其余走代理。")
+                Text("顺序：局域网直连 → 自定义域名 → 自定义规则集 → 国内域名直连 → 国外域名走代理 →（可选）国内 IP 直连 → 其余走代理。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("自定义（每行一个域名后缀，如 example.com）") {
@@ -411,6 +428,9 @@ struct RulesView: View {
                         TextEditor(text: $proxy).font(.system(.body, design: .monospaced)).frame(height: 110)
                     }
                 }
+            }
+            Section("自定义远程规则集") {
+                CustomRuleSetsSection()
             }
             Section("规则集") {
                 HStack {
@@ -452,7 +472,7 @@ struct UpdatesView: View {
     @EnvironmentObject var controller: AppController
 
     var body: some View {
-        Form {
+        Group {
             Section("KongPrism") {
                 HStack {
                     Text("当前版本 \(AppUpdater.version)（\(AppUpdater.build)）")
@@ -502,7 +522,6 @@ struct UpdatesView: View {
                 Text("新内核会先用当前配置做一次检查，通过后才替换；不通过则保持原内核。").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
     }
 }
 
@@ -512,7 +531,7 @@ struct AboutView: View {
     @EnvironmentObject var controller: AppController
 
     var body: some View {
-        Form {
+        Group {
             Section {
                 HStack(spacing: 16) {
                     Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64)
@@ -540,6 +559,7 @@ struct AboutView: View {
                     Button("诊断连接…") { Diagnostics.show(controller: controller) }
                     Button("导出脱敏订阅样本…") { Diagnostics.exportSample(controller: controller) }
                     Button("生成问题报告") { ProblemReport.create(controller: controller) }
+                    Button("新手引导…") { Onboarding.show() }
                 }
                 Text(ShellExports.command(port: controller.settings.mixedPort)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }
@@ -548,6 +568,5 @@ struct AboutView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
     }
 }

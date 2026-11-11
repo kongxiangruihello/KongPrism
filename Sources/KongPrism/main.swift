@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // otherwise this copy steps aside.
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+        let tookOver = !others.isEmpty
         if !others.isEmpty {
             func version(of app: NSRunningApplication) -> String {
                 guard let url = app.bundleURL, let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist")) else { return "0" }
@@ -41,8 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for app in others where !app.isTerminated { app.forceTerminate() }
         }
         AppLog.write("KongPrism \(AppUpdater.version)（\(AppUpdater.build)）启动")
+        CrashRecords.begin(tookOver: tookOver)
         let menu = StatusMenu()
         menu.openSettings = { [weak self] tab in self?.settings.show(tab) }
+        URLActions.openSettings = { [weak self] tab in self?.settings.show(tab) }
         menu.openConnections = { [weak self] in
             guard let self else { return }
             if self.connectionsWindow == nil { self.connectionsWindow = ConnectionsWindowController() }
@@ -52,13 +55,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = AppController.shared
         controller.launch()
         AppUpdater.reportLastUpdate(controller: controller)
-        if controller.profiles.isEmpty { settings.show(.profiles) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { AppUpdater.offerMoveToApplications() }
+        if controller.profiles.isEmpty {
+            // 新手引导：添加订阅 → 开启代理 → 验证 Google；也提示位置和其他代理软件。
+            Onboarding.show()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { AppUpdater.offerMoveToApplications() }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         AppController.shared.shutdown()
         AppController.shared.installStagedUpdateOnQuit()
+        CrashRecords.end()
     }
 
     /// clash:// sing-box:// kongprism:// links, and files opened with KongPrism.

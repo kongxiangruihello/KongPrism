@@ -22,6 +22,14 @@ enum Diagnostics {
         let running = controller.core.isRunning
         lines.append(Line(ok: running, text: running ? "内核正在运行（sing-box \(controller.coreVersion ?? "?")）" : "内核没有运行：\(statusText(controller.status))"))
 
+        // 1b. Crashes
+        let crashes = CrashRecords.recentReports(days: 14)
+        if CrashRecords.lastRunEndedAbnormally || !crashes.isEmpty {
+            var text = CrashRecords.lastRunEndedAbnormally ? "上次 KongPrism 没有正常退出" : "近 14 天有崩溃记录"
+            if !crashes.isEmpty { text += "；崩溃记录：" + crashes.prefix(3).map(\.lastPathComponent).joined(separator: "、") + "（已附在问题报告里）" }
+            lines.append(Line(ok: nil, text: text))
+        }
+
         // 2. Other proxy clients
         let others = NSWorkspace.shared.runningApplications.compactMap { app -> String? in
             guard let id = app.bundleIdentifier?.lowercased(), id != Bundle.main.bundleIdentifier?.lowercased(),
@@ -39,7 +47,7 @@ enum Diagnostics {
         if settings.tunMode {
             lines.append(Line(ok: nil, text: "增强模式不使用系统代理。当前系统代理：\(current)"))
         } else if !settings.setSystemProxy {
-            lines.append(Line(ok: nil, text: "未让 KongPrism 设置系统代理（设置 › 常规）。当前系统代理：\(current)"))
+            lines.append(Line(ok: nil, text: "未让 KongPrism 设置系统代理（设置 › 网络）。当前系统代理：\(current)"))
         } else if SystemProxy.isPointing(to: port) {
             lines.append(Line(ok: true, text: "系统代理指向 KongPrism（127.0.0.1:\(port)）"))
         } else {

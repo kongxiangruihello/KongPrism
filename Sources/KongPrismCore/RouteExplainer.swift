@@ -46,6 +46,13 @@ public enum RouteExplainer {
         if isIP, isPrivate(host) { return answer(.direct, "局域网 / 本机地址，总是直连") }
         if let suffix = matchingSuffix(host, options.directDomains) { return answer(.direct, "命中你的“总是直连”：\(suffix)") }
         if let suffix = matchingSuffix(host, options.proxyDomains) { return answer(.proxy, "命中你的“总是走代理”：\(suffix)") }
+        for custom in options.customRuleSets where inRuleSet(custom.set, host) {
+            switch custom.target {
+            case "reject": return answer(.reject, "命中自定义规则集“\(custom.set.tag)”，拦截")
+            case "direct": return answer(.direct, "命中自定义规则集“\(custom.set.tag)”，直连")
+            default: return answer(.proxy, "命中自定义规则集“\(custom.set.tag)”，走节点")
+            }
+        }
         if !isIP {
             if options.blockAds, inRuleSet(.ads, host) { return answer(.reject, "在广告域名列表里（geosite-category-ads-all），会被拦截") }
             for service in options.routedServices where inRuleSet(service.ruleSet, host) {

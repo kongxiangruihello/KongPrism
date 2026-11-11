@@ -100,7 +100,7 @@ final class CoreManager: @unchecked Sendable {
     func ruleSetContains(_ set: RuleSet, _ host: String) -> Bool {
         guard let binary = binary() else { return false }
         let file = Paths.rules.appendingPathComponent(set.file).path
-        let result = Shell.run(binary.path, ["rule-set", "match", "-f", "binary", file, host, "--disable-color"], timeout: 10)
+        let result = Shell.run(binary.path, ["rule-set", "match", "-f", set.format, file, host, "--disable-color"], timeout: 10)
         return result.ok && result.output.contains("match rules")
     }
 
@@ -240,6 +240,6 @@ final class CoreManager: @unchecked Sendable {
             if Self.isPortFree(port) { return }
         }
         let who = owner.map { "“\($0.name)”" } ?? "其他程序（可能 KongBabel、Clash 等）"
-        throw CoreError("\(label) \(port) 被 \(who) 占用。请退出它，或在 设置 › 常规 里换一个端口")
+        throw CoreError("\(label) \(port) 被 \(who) 占用。请退出它，或在 设置 › 网络 里换一个端口")
     }
 }

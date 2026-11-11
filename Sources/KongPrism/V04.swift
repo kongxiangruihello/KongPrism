@@ -169,6 +169,14 @@ enum ProblemReport {
             write("app.log", tail(Paths.appLog, lines: 300))
             write("core.log", tail(controller.core.logURL, lines: 300))
             write("设置摘要.txt", settingsSummary(controller))
+            // Crash reports from ~/Library/Logs/DiagnosticReports (KongPrism and sing-box, last 14 days).
+            let crashes = CrashRecords.recentReports(days: 14).prefix(5)
+            if !crashes.isEmpty || CrashRecords.lastRunEndedAbnormally {
+                let crashFolder = folder.appendingPathComponent("崩溃记录")
+                try? FileManager.default.createDirectory(at: crashFolder, withIntermediateDirectories: true)
+                for report in crashes { try? FileManager.default.copyItem(at: report, to: crashFolder.appendingPathComponent(report.lastPathComponent)) }
+                try? CrashRecords.summary().write(to: crashFolder.appendingPathComponent("说明.txt"), atomically: true, encoding: .utf8)
+            }
             if let profile = controller.selectedProfile, let address = profile.url.flatMap(URL.init(string:)) {
                 let agent = profile.workingUserAgent ?? profile.userAgent ?? SubscriptionFetcher.agents[0]
                 if let (data, _) = try? await Net.get(address, headers: SubscriptionFetcher.headers(agent: agent, url: address),
@@ -208,6 +216,7 @@ enum ProblemReport {
             "按服务分流：\(s.serviceTargets.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: "，"))",
             "合并订阅：\(s.mergeAllProfiles)　备用订阅：\(s.backupProfileID != nil)",
             "网络规则 \(s.networkRules.count) 条　iCloud 同步：\(s.iCloudSync)",
+            "自定义规则集：\(s.customRuleSets.map(\.summaryLine).joined(separator: "，"))　收藏节点 \(s.favoriteNodes.count) 个",
             "订阅：",
         ]
         for profile in controller.profiles {

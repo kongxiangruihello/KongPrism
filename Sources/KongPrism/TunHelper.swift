@@ -42,7 +42,7 @@ enum TunHelper {
         let result = Shell.run("/usr/bin/sudo", ["-n", helperPath, "start"], timeout: 20)
         guard result.ok else {
             if result.output.contains("password") || result.output.contains("sudo:") {
-                throw Failure(message: "增强模式的辅助程序没有授权，请在 设置 › 常规 里重新安装")
+                throw Failure(message: "增强模式的辅助程序没有授权，请在 设置 › 网络 里重新安装")
             }
             throw Failure(message: "增强模式启动失败：\(result.output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(300))")
         }

@@ -116,6 +116,10 @@ struct AppSettings: Codable, Equatable {
     var autoInstallUpdates = false
     var pauseSpeedOnBattery = true
     var serviceTargets: [String: String] = [:]
+    /// 0.5 features
+    var favoriteNodes: [String] = []
+    var customRuleSets: [CustomRuleSetSetting] = []
+    var onboardingDone = false
     /// Bumped when a default changes for everyone (see the migration in init(from:)).
     var settingsVersion = AppSettings.currentVersion
 
@@ -171,6 +175,9 @@ struct AppSettings: Codable, Equatable {
         autoInstallUpdates = v(.autoInstallUpdates, d.autoInstallUpdates)
         pauseSpeedOnBattery = v(.pauseSpeedOnBattery, d.pauseSpeedOnBattery)
         serviceTargets = v(.serviceTargets, d.serviceTargets)
+        favoriteNodes = v(.favoriteNodes, d.favoriteNodes)
+        customRuleSets = v(.customRuleSets, d.customRuleSets)
+        onboardingDone = v(.onboardingDone, d.onboardingDone)
         let version = v(.settingsVersion, 1)
         // 0.1.0 resolved unknown domains through the domestic DNS and sent the IP to the
         // proxy, which broke sites with polluted answers; turn that off once for everyone.
@@ -200,6 +207,12 @@ struct AppSettings: Codable, Equatable {
         options.proxyDomains = proxyDomains
         options.tun = tunMode
         options.serviceTargets = serviceTargets
+        // Only rule-sets that downloaded at least once (sing-box refuses a missing local file).
+        options.customRuleSets = customRuleSets.compactMap { custom in
+            guard custom.enabled, let set = custom.ruleSet,
+                  FileManager.default.fileExists(atPath: Paths.rules.appendingPathComponent(set.file).path) else { return nil }
+            return CustomRule(set: set, target: custom.target)
+        }
         return options
     }
 }

@@ -91,6 +91,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             item.isEnabled = false
             menu.addItem(item)
         }
+        if let notice = CrashRecords.notice {
+            let item = action("⚠︎ " + notice + "（点此不再提示）", #selector(dismissCrashNotice), key: "")
+            item.attributedTitle = NSAttributedString(string: item.title, attributes: [.foregroundColor: NSColor.systemOrange, .font: NSFont.menuFont(ofSize: 0)])
+            item.toolTip = "崩溃记录会自动附在“生成问题报告”和“诊断连接”里"
+            menu.addItem(item)
+        }
         if let notice = controller.networkNotice {
             let item = NSMenuItem(title: "🛜 " + notice, action: nil, keyEquivalent: "")
             item.isEnabled = false
@@ -135,6 +141,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let hint = NSMenuItem(title: "复制订阅地址后再打开此菜单，或点网页上的“一键导入”", action: nil, keyEquivalent: "")
             hint.isEnabled = false
             menu.addItem(hint)
+            menu.addItem(action("新手引导…", #selector(showOnboarding), key: ""))
         }
         menu.addItem(.separator())
 
@@ -226,7 +233,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let snapshot = controller.snapshot
         var addedSeparator = false
         var hidden = 0
-        for name in selector.all {
+        // 收藏的节点排在分组之后、其他节点之前。
+        let favorites = Set(controller.settings.favoriteNodes)
+        let groups = selector.all.filter { snapshot.groups[$0] != nil || $0 == Groups.direct }
+        let plain = selector.all.filter { snapshot.groups[$0] == nil && $0 != Groups.direct }
+        let favored = plain.filter { favorites.contains($0) }
+        let ordered = groups + favored + plain.filter { !favorites.contains($0) }
+        for name in ordered {
             let isGroup = snapshot.groups[name] != nil
             if controller.settings.hideDeadNodes, !isGroup, name != Groups.direct, snapshot.delays[name] == 0, selector.now != name {
                 hidden += 1
@@ -242,14 +255,31 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             entry.representedObject = name
             entry.state = selector.now == name ? .on : .off
             let delayName = isGroup ? (snapshot.groups[name]?.now ?? name) : name
-            entry.attributedTitle = row(title, delay: name == Groups.direct ? nil : snapshot.delays[delayName])
+            let favorite = favorites.contains(name)
+            entry.attributedTitle = row((favorite ? "★ " : "") + title, delay: name == Groups.direct ? nil : snapshot.delays[delayName])
             submenu.addItem(entry)
+            if !isGroup, name != Groups.direct {
+                // 按住 Option 时变成“收藏 / 取消收藏”。
+                let star = action(favorite ? "取消收藏 \(name)" : "收藏 \(name)", #selector(toggleFavorite(_:)), key: "")
+                star.representedObject = name
+                star.isAlternate = true
+                star.keyEquivalentModifierMask = [.option]
+                submenu.addItem(star)
+            }
+            if favorite, name == favored.last, favored.count < plain.count {
+                submenu.addItem(.separator())
+            }
         }
         submenu.addItem(.separator())
         if hidden > 0 {
             let note = NSMenuItem(title: "已隐藏 \(hidden) 个不可用节点", action: nil, keyEquivalent: "")
             note.isEnabled = false
             submenu.addItem(note)
+        }
+        if favorites.isEmpty {
+            let tip = NSMenuItem(title: "按住 Option 可收藏节点，收藏的排在最前", action: nil, keyEquivalent: "")
+            tip.isEnabled = false
+            submenu.addItem(tip)
         }
         submenu.addItem(action("全部节点…", #selector(showNodes), key: ""))
         let test = action(controller.testing ? "正在测速…" : "测速", #selector(testLatency), key: "t")
@@ -317,6 +347,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func copyExports() { controller.copyShellExports() }
     @objc private func diagnose() { Diagnostics.show(controller: controller) }
     @objc private func problemReport() { ProblemReport.create(controller: controller) }
+    @objc private func toggleFavorite(_ sender: NSMenuItem) { if let name = sender.representedObject as? String { controller.toggleFavorite(name) } }
+    @objc private func dismissCrashNotice() { CrashRecords.dismissNotice() }
+    @objc private func showOnboarding() { Onboarding.show() }
     @objc private func switchToAuto() { controller.select(Groups.auto, in: Groups.select) }
     @objc private func showNodes() { openSettings?(.nodes) }
     @objc private func showConnections() { openConnections?() }
