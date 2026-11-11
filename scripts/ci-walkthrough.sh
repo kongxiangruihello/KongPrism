@@ -37,7 +37,7 @@ cleanup() {
   [[ -n "${HTTP_PID:-}" ]] && kill "$HTTP_PID" 2>/dev/null || true
   echo; echo "--- app.log ---"; tail -60 "$SUPPORT/logs/app.log" 2>/dev/null || true
   echo "--- core.log ---"; tail -30 "$SUPPORT/logs/core.log" 2>/dev/null || true
-  [[ $status -eq 0 ]] && echo "走查通过" || echo "走查失败（退出码 $status）"
+  [[ $status -eq 0 ]] && echo "走查通过" || echo "走查失败（退出码 ${status}）"
   exit "$status"
 }
 trap cleanup EXIT
