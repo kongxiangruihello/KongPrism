@@ -121,7 +121,14 @@ if [[ $dmg -eq 1 ]]; then
   ln -s /Applications "$dmg_stage/Applications"
   dmg_path="$root/build/KongPrism-$version.dmg"
   rm -f "$dmg_path"
-  hdiutil create -volname "KongPrism $version" -srcfolder "$dmg_stage" -ov -format UDZO "$dmg_path" >/dev/null
+  # hdiutil's own size estimate is sometimes too small ("No space left on device"):
+  # give it the folder size plus room, and retry a couple of times.
+  size_mb=$(( $(du -sm "$dmg_stage" | cut -f1) + 40 ))
+  for attempt in 1 2 3; do
+    if hdiutil create -volname "KongPrism $version" -srcfolder "$dmg_stage" -size "${size_mb}m" -ov -format UDZO "$dmg_path" >/dev/null; then break; fi
+    [[ $attempt == 3 ]] && { echo "DMG 创建失败"; exit 1; }
+    echo "hdiutil 失败，重试（第 ${attempt} 次）"; size_mb=$(( size_mb * 2 )); sleep 3
+  done
   echo "DMG: $dmg_path"
 fi
 
