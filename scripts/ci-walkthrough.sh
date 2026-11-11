@@ -224,12 +224,16 @@ test "$(hits /limited.yaml)" = "$l1" && test "$(hits /refused.yaml)" = "$r1" || 
 echo "✅ 429 只请求 1 次并按 Retry-After 暂停（最短 10 分钟）；403 暂停 3 小时并记下“访问受限”；暂停期间不再请求"
 
 step "断开旧连接（唤醒 / 切网后的恢复）"
-curl -sS -m 70 -x "http://127.0.0.1:$PORT" -o /dev/null "http://127.0.0.1:$SUBPORT/slow" 2>/dev/null &
+# -p: a CONNECT tunnel, like browsers use for HTTPS (a plain-HTTP proxy request is kept alive by the inbound).
+curl -sS -p -m 70 -x "http://127.0.0.1:$PORT" -o /dev/null "http://127.0.0.1:$SUBPORT/slow" 2>/dev/null &
 SLOW=$!
 sleep 3
 api /connections | python3 -c 'import json,sys; c=json.load(sys.stdin)["connections"] or []; print("当前连接", len(c)); assert any(x["metadata"].get("destinationPort") in ("18080", 18080) for x in c)'
 link recover
-if ! wait_for 10 bash -c "! kill -0 $SLOW 2>/dev/null"; then echo "❌ 旧连接没有被断开"; exit 1; fi
+if ! wait_for 10 bash -c "! kill -0 $SLOW 2>/dev/null"; then
+  api /connections | python3 -c 'import json,sys; c=json.load(sys.stdin)["connections"] or []; print("仍在的连接：", [(x["metadata"].get("host") or x["metadata"].get("destinationIP"), x["metadata"].get("destinationPort")) for x in c])'
+  echo "❌ 旧连接没有被断开"; exit 1
+fi
 wait_for 15 grep -q "链接动作后已断开旧连接并重新测速" "$SUPPORT/logs/app.log"
 echo "✅ 长连接被断开（应用会立即重连），并重新测速：$(grep "链接动作后已断开旧连接" "$SUPPORT/logs/app.log" | tail -1 | cut -c21-)"
 
