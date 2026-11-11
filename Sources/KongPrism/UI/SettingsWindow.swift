@@ -313,6 +313,9 @@ struct GeneralView: View {
                 Toggle("手选的节点连不上时，自动切回“自动选择”", isOn: $controller.settings.autoFailover)
                 Toggle("订阅快到期或流量快用完时发系统通知", isOn: $controller.settings.usageNotifications)
             }
+            Section("快捷指令") {
+                ShortcutsSection()
+            }
             Section("备份与迁移") {
                 HStack {
                     Button("导出设置…") { BackupActions.exportInteractively(controller: controller) }
