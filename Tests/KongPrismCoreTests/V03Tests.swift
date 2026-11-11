@@ -76,4 +76,29 @@ final class V03Tests: XCTestCase {
         XCTAssertEqual(outcome.built.nodeTags, ["Good"])
         XCTAssertEqual(calls, 2)
     }
+
+    /// The app asks `sing-box rule-set match` and looks for "match rules" in its output.
+    func testRouteLookupWithRealRuleFiles() throws {
+        guard let binary = ProcessInfo.processInfo.environment["KONGPRISM_SINGBOX"], FileManager.default.isExecutableFile(atPath: binary) else {
+            throw XCTSkip("KONGPRISM_SINGBOX 未设置")
+        }
+        let rules = V02Tests.repo.appendingPathComponent("Resources/rules")
+        func matches(_ set: RuleSet, _ host: String) -> Bool {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: binary)
+            process.arguments = ["rule-set", "match", "-f", "binary", rules.appendingPathComponent(set.file).path, host, "--disable-color"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try? process.run()
+            process.waitUntilExit()
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            return process.terminationStatus == 0 && output.contains("match rules")
+        }
+        let options = CoreOptions()
+        XCTAssertEqual(RouteExplainer.explain("https://www.baidu.com", options: options, inRuleSet: matches).target, .direct)
+        XCTAssertEqual(RouteExplainer.explain("www.google.com", options: options, inRuleSet: matches).target, .proxy)
+        XCTAssertEqual(RouteExplainer.explain("114.114.114.114", options: options, inRuleSet: matches).target, .direct)
+        XCTAssertEqual(RouteExplainer.explain("8.8.8.8", options: options, inRuleSet: matches).target, .proxy)
+    }
 }
