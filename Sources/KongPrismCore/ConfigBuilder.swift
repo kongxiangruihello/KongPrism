@@ -253,14 +253,64 @@ public enum ConfigBuilder {
 
 /// Reads `sing-box check` errors to find which node broke the config.
 public enum CheckError {
-    /// "outbounds[12].transport…" → 12
+    /// "decode config at …: outbounds[12].transport: …" or "initialize outbound[12]: bad key length" → 12
     public static func outboundIndex(in message: String) -> Int? {
-        guard let range = message.range(of: "outbounds\\[[0-9]+\\]", options: .regularExpression) else { return nil }
-        return Int(message[range].dropFirst("outbounds[".count).dropLast())
+        guard let range = message.range(of: "outbounds?\\[[0-9]+\\]", options: .regularExpression) else { return nil }
+        let text = message[range]
+        guard let open = text.firstIndex(of: "[") else { return nil }
+        return Int(text[text.index(after: open)...].dropLast())
     }
 
     /// "… outbound/vless[HK 01]: …" style messages name the tag.
     public static func outboundTag(in message: String, among tags: [String]) -> String? {
         tags.first { message.contains("[\($0)]") }
+    }
+
+    /// The last line of sing-box output without colour codes and the "FATAL[0000]" prefix.
+    public static func readable(_ output: String) -> String {
+        let plain = output.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+        let line = plain.split(whereSeparator: \.isNewline).last.map(String.init) ?? plain
+        return line.replacingOccurrences(of: "^\\s*(FATAL|ERROR)\\[[0-9]+\\]\\s*", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+}
+
+/// Builds a config and has sing-box check it; a node sing-box rejects (unknown option,
+/// unsupported transport, bad key) is left out and the check repeated, so one broken
+/// node cannot take a whole subscription down.
+public enum CheckedBuild {
+    public struct Outcome {
+        public let built: BuiltConfig
+        public let dropped: [(name: String, reason: String)]
+    }
+
+    public struct Failure: Error, LocalizedError {
+        public let message: String
+        public var errorDescription: String? { message }
+    }
+
+    /// `check` receives each candidate config and returns sing-box's verdict.
+    public static func build(nodes: [ProxyNode], options: CoreOptions, maxDrops: Int = 25,
+                             check: (BuiltConfig) throws -> (ok: Bool, output: String)) throws -> Outcome {
+        var remaining = NodeFilter.uniqued(nodes)
+        var dropped: [(name: String, reason: String)] = []
+        for _ in 0...maxDrops {
+            let built = ConfigBuilder.build(nodes: remaining, options: options)
+            let result = try check(built)
+            if result.ok { return Outcome(built: built, dropped: dropped) }
+            let reason = CheckError.readable(result.output)
+            var badTag: String?
+            if let index = CheckError.outboundIndex(in: result.output) {
+                let position = index - built.nodeOffset
+                if position >= 0, position < built.nodeTags.count { badTag = built.nodeTags[position] }
+            }
+            if badTag == nil { badTag = CheckError.outboundTag(in: result.output, among: built.nodeTags) }
+            guard let tag = badTag, let position = remaining.firstIndex(where: { $0.name == tag }) else {
+                throw Failure(message: "sing-box 配置检查未通过：\(reason)")
+            }
+            dropped.append((tag, reason))
+            remaining.remove(at: position)
+        }
+        throw Failure(message: "被内核拒绝的节点太多（超过 \(maxDrops) 个），请检查订阅")
     }
 }

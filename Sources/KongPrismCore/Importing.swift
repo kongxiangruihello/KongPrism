@@ -30,7 +30,8 @@ public enum ImportSource {
         }
         guard var url = value("url") ?? value("config") ?? value("link") else { return nil }
         // Some panels encode the URL twice.
-        if !url.hasPrefix("http"), let decoded = url.removingPercentEncoding, decoded.hasPrefix("http") { url = decoded }
+        if !url.hasPrefix("http://") && !url.hasPrefix("https://"), let decoded = url.removingPercentEncoding,
+           decoded.hasPrefix("http://") || decoded.hasPrefix("https://") { url = decoded }
         guard url.hasPrefix("http://") || url.hasPrefix("https://") else { return nil }
         var name = value("name") ?? value("remarks") ?? components.fragment?.removingPercentEncoding
         if let current = name, current.isEmpty { name = nil }

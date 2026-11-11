@@ -63,37 +63,20 @@ final class CoreManager: @unchecked Sendable {
     // MARK: Config
 
     func check(_ config: URL, with binary: URL) -> Shell.Result {
-        Shell.run(binary.path, ["check", "-c", config.path, "-D", Paths.runtime.path], timeout: 30)
+        Shell.run(binary.path, ["check", "-c", config.path, "-D", Paths.runtime.path, "--disable-color"], timeout: 30)
     }
 
-    /// Writes the config and runs `sing-box check`. A node sing-box rejects (an option this
-    /// version does not know, a bad key) is left out and the check repeated, so one broken
-    /// node cannot take the whole subscription down.
+    /// Writes the config and runs `sing-box check`, leaving out nodes sing-box rejects.
     func prepare(nodes: [ProxyNode], options: CoreOptions) throws -> Prepared {
         guard let binary = binary() else { throw CoreError("找不到 sing-box 内核（应用包内和 Application Support 里都没有）") }
-        var remaining = NodeFilter.uniqued(nodes)
-        var dropped: [String] = []
-        for _ in 0..<25 {
-            let built = ConfigBuilder.build(nodes: remaining, options: options)
+        let outcome = try CheckedBuild.build(nodes: nodes, options: options) { built in
             try built.data.write(to: Paths.config, options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Paths.config.path)
             let result = check(Paths.config, with: binary)
-            if result.ok { return Prepared(built: built, dropped: dropped) }
-            let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            var badTag: String?
-            if let index = CheckError.outboundIndex(in: message) {
-                let position = index - built.nodeOffset
-                if position >= 0, position < built.nodeTags.count { badTag = built.nodeTags[position] }
-            }
-            if badTag == nil { badTag = CheckError.outboundTag(in: message, among: built.nodeTags) }
-            guard let tag = badTag, let position = remaining.firstIndex(where: { $0.name == tag }) else {
-                throw CoreError("sing-box 配置检查未通过：\(message.split(separator: "\n").last.map(String.init) ?? message)")
-            }
-            AppLog.write("跳过节点 \(tag)：\(message)")
-            dropped.append(tag)
-            remaining.remove(at: position)
+            return (result.ok, result.output)
         }
-        throw CoreError("被内核拒绝的节点太多，请检查订阅")
+        for (name, reason) in outcome.dropped { AppLog.write("跳过节点 \(name)：\(reason)") }
+        return Prepared(built: outcome.built, dropped: outcome.dropped.map { $0.name })
     }
 
     // MARK: Process
