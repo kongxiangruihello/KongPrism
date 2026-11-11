@@ -313,6 +313,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// The menu as indented text, after fetching fresh node state like opening it does.
     func dump() async -> String {
+        // A reload may be under way (e.g. right after an iCloud sync): wait up to 10 s for it.
+        for _ in 0..<100 where controller.status == .starting {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
         controller.verifyCoreAlive()
         if controller.status.isRunning { await controller.refreshSnapshot() }
         build()

@@ -365,6 +365,8 @@ wait_for 20 written_back
 python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['device'] != '另一台 Mac' and d['favoriteNodes'] == ['CI-SS'] and len(d['customRuleSets']) == 2; print('✅ 本机写回 iCloud：', d['device'])" "$CLOUD/KongPrism/sync.json"
 
 step "菜单内容"
+sleep 3   # the iCloud sync above reloads the core
+wait_for 20 api /version
 rm -f "$SUPPORT/menu.txt"
 link menu
 wait_for 15 test -f "$SUPPORT/menu.txt"
