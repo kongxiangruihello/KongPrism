@@ -1,0 +1,52 @@
+name: probe
+on:
+  push:
+    branches: [claude/updater-probe]
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Does a child process survive when its GUI app quits?
+        run: |
+          set -x
+          mkdir -p /tmp/Probe.app/Contents/MacOS
+          cat > /tmp/Probe.app/Contents/Info.plist <<'PL'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleExecutable</key><string>probe</string>
+          <key>CFBundleIdentifier</key><string>com.example.probe</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>LSUIElement</key><true/>
+          </dict></plist>
+          PL
+          cat > /tmp/probe.swift <<'SW'
+          import Foundation
+          // Same as KongPrism's updater: spawn bash with Process, then exit.
+          let p = Process()
+          p.executableURL = URL(fileURLWithPath: "/bin/bash")
+          p.arguments = ["-c", "sleep 4; echo survived > /tmp/probe-plain.txt"]
+          p.standardOutput = FileHandle.nullDevice
+          p.standardError = FileHandle.nullDevice
+          try! p.run()
+          // Variant: detached through launchctl submit.
+          let q = Process()
+          q.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+          q.arguments = ["submit", "-l", "com.example.probe.helper", "--", "/bin/bash", "-c", "sleep 4; echo survived > /tmp/probe-launchctl.txt"]
+          try! q.run(); q.waitUntilExit()
+          // Variant: nohup + background inside bash.
+          let r = Process()
+          r.executableURL = URL(fileURLWithPath: "/bin/bash")
+          r.arguments = ["-c", "nohup bash -c 'sleep 4; echo survived > /tmp/probe-nohup.txt' >/dev/null 2>&1 &"]
+          try! r.run(); r.waitUntilExit()
+          sleep(1)
+          exit(0)
+          SW
+          xcrun swiftc /tmp/probe.swift -o /tmp/Probe.app/Contents/MacOS/probe
+          codesign --force --sign - /tmp/Probe.app
+          open /tmp/Probe.app
+          sleep 9
+          ls -la /tmp/probe-*.txt || true
+          for f in plain launchctl nohup; do test -f /tmp/probe-$f.txt && echo "$f: SURVIVED" || echo "$f: KILLED"; done
+          launchctl remove com.example.probe.helper || true
