@@ -31,18 +31,21 @@ quit_app() { osascript -e 'tell application id "com.kongxiangrui.KongPrism" to q
 rss_mb() { ps -o rss= -p "$1" | awk '{printf "%.0f", $1/1024}'; }
 
 cleanup() {
+  local status=$?
   quit_app || pkill -x KongPrism || true
   [[ -n "${SS_PID:-}" ]] && kill "$SS_PID" 2>/dev/null || true
   [[ -n "${HTTP_PID:-}" ]] && kill "$HTTP_PID" 2>/dev/null || true
   echo; echo "--- app.log ---"; tail -60 "$SUPPORT/logs/app.log" 2>/dev/null || true
   echo "--- core.log ---"; tail -30 "$SUPPORT/logs/core.log" 2>/dev/null || true
+  [[ $status -eq 0 ]] && echo "走查通过" || echo "走查失败（退出码 $status）"
+  exit "$status"
 }
 trap cleanup EXIT
 
 step "节点和订阅（本机模拟机场）"
 IP="$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || true)"
 [[ -n "$IP" ]] || IP="$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')"
-echo "本机地址 $IP（订阅里不能用 127.0.0.1：那是机场拒绝访问时的占位节点）"
+echo "本机地址 ${IP}（订阅里不能用 127.0.0.1：那是机场拒绝访问时的占位节点）"
 cat > "$work/ss.json" <<JSON
 {"log":{"level":"warn"},
  "inbounds":[{"type":"shadowsocks","listen":"0.0.0.0","listen_port":$SSPORT,"method":"aes-128-gcm","password":"ci-password"}],
@@ -85,7 +88,7 @@ SYSTEM_PROXY=false
 service="$(networksetup -listallnetworkservices | sed 1d | grep -v '^\*' | head -1)"
 if networksetup -setwebproxystate "$service" off 2>/dev/null; then
   SYSTEM_PROXY=true
-  echo "networksetup 可直接改系统代理（服务：$service），一并检查系统代理"
+  echo "networksetup 可直接改系统代理（服务：${service}），一并检查系统代理"
 else
   echo "networksetup 需要管理员授权，跳过系统代理检查"
 fi
