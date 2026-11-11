@@ -366,11 +366,17 @@ final class AppController: ObservableObject {
     /// Restarts the core with the current settings. Changes made within 1.2 seconds of each other
     /// are applied with one restart (each restart drops every connection for a moment).
     func reloadIfRunning(immediately: Bool = false) {
-        guard status.isRunning else { return }
+        guard status.isRunning || status == .starting else { return }
         reloadTask?.cancel()
         reloadTask = Task {
             if !immediately {
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if Task.isCancelled { return }
+            }
+            // Never two starts at once (overlapping enhanced-mode starts left a stray root core, CI):
+            // wait for a start in progress to finish first.
+            for _ in 0..<100 where status == .starting {
+                try? await Task.sleep(nanoseconds: 150_000_000)
                 if Task.isCancelled { return }
             }
             guard status.isRunning else { return }

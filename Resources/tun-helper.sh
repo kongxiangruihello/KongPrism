@@ -19,6 +19,13 @@ stop_core() {
     # Only return once it is gone: KongPrism starts the next core on the same ports right after.
     for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
   fi
+  # Also any other copy (two overlapping starts could leave one that the pid file no longer names).
+  if /usr/bin/pgrep -f "^$CORE run" >/dev/null; then
+    /usr/bin/pkill -f "^$CORE run"
+    for _ in $(seq 1 30); do /usr/bin/pgrep -f "^$CORE run" >/dev/null || break; sleep 0.1; done
+    /usr/bin/pkill -9 -f "^$CORE run" 2>/dev/null
+    for _ in $(seq 1 20); do /usr/bin/pgrep -f "^$CORE run" >/dev/null || break; sleep 0.1; done
+  fi
   rm -f "$PIDFILE"
 }
 
