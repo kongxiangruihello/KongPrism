@@ -55,8 +55,9 @@ enum TunHelper {
     }
 
     static func stop() {
-        guard isInstalled else { return }
-        Shell.run("/usr/bin/sudo", ["-n", helperPath, "stop"], timeout: 15)
+        guard isInstalled else { AppLog.write("增强模式：辅助程序未安装，无法停止 root 内核"); return }
+        let result = Shell.run("/usr/bin/sudo", ["-n", helperPath, "stop"], timeout: 15)
+        AppLog.write("增强模式内核已停止" + (result.ok ? "" : "（\(result.output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(200))）"))
     }
 
     // MARK: Installing (administrator authorization)

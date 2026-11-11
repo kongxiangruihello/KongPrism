@@ -552,7 +552,14 @@ fi
 echo "✅ 上千条连接下没有“too many open files”（辅助程序已把上限从 256 提到 65536）"
 link "tun/off"
 wait_for 30 bash -c '! route -n get 1.1.1.1 | grep -q "interface: utun"'
-wait_for 30 api /version
+if ! wait_for 30 api /version; then
+  echo "--- 端口 $API 的占用者 ---"; sudo lsof -nP -iTCP:"$API" -sTCP:LISTEN || true
+  echo "--- sing-box 进程 ---"; ps -axo pid,user,etime,command | grep -i sing-box | grep -v grep || true
+  echo "--- 辅助程序状态 ---"; sudo /Library/PrivilegedHelperTools/com.kongxiangrui.KongPrism.tun status || true
+  sudo cat "/Library/Application Support/KongPrismTUN/sing-box.pid" || true
+  ls -la /etc/sudoers.d/ /Library/PrivilegedHelperTools/ || true
+  exit 1
+fi
 echo "✅ App 内开启增强模式：全部流量经过内核；关闭后 root 内核退出、端口释放、回到系统代理模式"
 
 step "关闭代理，系统代理复原"
