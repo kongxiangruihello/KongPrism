@@ -12,6 +12,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var cancellables: Set<AnyCancellable> = []
     private var clipboardSuggestion: Importer.Suggestion?
     var openSettings: ((SettingsTab) -> Void)?
+    var openConnections: (() -> Void)?
 
     override init() {
         super.init()
@@ -57,6 +58,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             await controller.refreshSnapshot()
             build() // while the menu is open, with fresh delays
             await controller.checkSelectedNode()
+            await controller.checkFailover()
             await controller.refreshExitInfoIfNeeded()
             build()
         }
@@ -81,6 +83,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(headerItem)
         if status.isRunning, let exit = controller.exitInfo {
             let item = NSMenuItem(title: "出口：" + exit.summary, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        if let notice = controller.networkNotice {
+            let item = NSMenuItem(title: "🛜 " + notice, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
         }
@@ -189,6 +196,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(action("复制终端代理命令", #selector(copyExports), key: "c"))
+        menu.addItem(action("连接…", #selector(showConnections), key: "l"))
         menu.addItem(action("诊断连接…", #selector(diagnose), key: "d"))
         if controller.appRelease != nil || controller.latestCore != nil {
             let update = action("有可用更新…", #selector(showUpdates), key: "")
@@ -205,8 +213,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         submenu.autoenablesItems = false
         let snapshot = controller.snapshot
         var addedSeparator = false
+        var hidden = 0
         for name in selector.all {
             let isGroup = snapshot.groups[name] != nil
+            if controller.settings.hideDeadNodes, !isGroup, name != Groups.direct, snapshot.delays[name] == 0, selector.now != name {
+                hidden += 1
+                continue
+            }
             if !isGroup, !addedSeparator {
                 submenu.addItem(.separator())
                 addedSeparator = true
@@ -221,6 +234,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             submenu.addItem(entry)
         }
         submenu.addItem(.separator())
+        if hidden > 0 {
+            let note = NSMenuItem(title: "已隐藏 \(hidden) 个不可用节点", action: nil, keyEquivalent: "")
+            note.isEnabled = false
+            submenu.addItem(note)
+        }
+        submenu.addItem(action("全部节点…", #selector(showNodes), key: ""))
         let test = action(controller.testing ? "正在测速…" : "测速", #selector(testLatency), key: "t")
         test.isEnabled = !controller.testing
         submenu.addItem(test)
@@ -286,6 +305,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func copyExports() { controller.copyShellExports() }
     @objc private func diagnose() { Diagnostics.show(controller: controller) }
     @objc private func switchToAuto() { controller.select(Groups.auto, in: Groups.select) }
+    @objc private func showNodes() { openSettings?(.nodes) }
+    @objc private func showConnections() { openConnections?() }
     @objc private func reapplyProxy() { controller.reapplySystemProxy() }
     @objc private func showSettings() { openSettings?(.general) }
     @objc private func showUpdates() { openSettings?(.updates) }

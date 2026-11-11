@@ -85,8 +85,10 @@ public enum Groups {
     public static let select = "节点选择"
     public static let auto = "自动选择"
     public static let direct = "直连"
+    /// Failover: the backup subscription's own fastest-node group.
+    public static let backup = "🛟 备用订阅"
     public static var reservedNames: Set<String> {
-        Set([select, auto, direct, "GLOBAL"] + Region.all.map(\.groupName))
+        Set([select, auto, direct, backup, "GLOBAL"] + Region.all.map(\.groupName))
     }
 }
 

@@ -5,6 +5,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menu: StatusMenu?
     private var settingsWindow: SettingsWindowController?
+    private var connectionsWindow: ConnectionsWindowController?
 
     @MainActor private var settings: SettingsWindowController {
         if let settingsWindow { return settingsWindow }
@@ -25,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLog.write("KongPrism \(AppUpdater.version)（\(AppUpdater.build)）启动")
         let menu = StatusMenu()
         menu.openSettings = { [weak self] tab in self?.settings.show(tab) }
+        menu.openConnections = { [weak self] in
+            guard let self else { return }
+            if self.connectionsWindow == nil { self.connectionsWindow = ConnectionsWindowController() }
+            self.connectionsWindow?.show()
+        }
         self.menu = menu
         let controller = AppController.shared
         controller.launch()

@@ -53,6 +53,8 @@ public struct CoreOptions: Equatable, Sendable {
     public var regionGroups = true
     /// Enhanced mode: a TUN interface captures all traffic (needs root; see the app's TUN helper).
     public var tun = false
+    /// Serve an expired DNS answer at once and refresh it in the background (sing-box 1.14).
+    public var optimisticDNS = true
     /// Domains always sent direct / always proxied (user rules).
     public var directDomains: [String] = []
     public var proxyDomains: [String] = []
@@ -66,38 +68,57 @@ public struct BuiltConfig {
     public let nodeTags: [String]
     public let nodeOffset: Int
     public let groups: [String]
+    /// Tags of the backup subscription's nodes (a subset of nodeTags).
+    public var backupTags: [String] = []
+    /// Protocol label per node tag, for the node list.
+    public var nodeProtocols: [String: String] = [:]
 
     public var data: Data { json.encoded() }
 }
 
 public enum ConfigBuilder {
-    public static func build(nodes rawNodes: [ProxyNode], options: CoreOptions) -> BuiltConfig {
-        let nodes = NodeFilter.uniqued(rawNodes)
-        let realNodes = NodeFilter.realNodes(nodes)
-        let realTags = realNodes.map(\.name)
+    /// `backupNodes`: a second subscription used only when every primary node fails (the app
+    /// switches 节点选择 to the 🛟 备用订阅 group; sing-box has no priority fallback of its own).
+    public static func build(nodes rawNodes: [ProxyNode], backupNodes rawBackup: [ProxyNode] = [], options: CoreOptions) -> BuiltConfig {
+        // Unique across both subscriptions, then split again.
+        let all = NodeFilter.uniqued(rawNodes + rawBackup)
+        let primaryAll = Array(all.prefix(rawNodes.count))
+        let backupAll = Array(all.dropFirst(rawNodes.count))
+        let realPrimary = NodeFilter.realNodes(primaryAll)
+        let realBackup = backupAll.isEmpty ? [] : NodeFilter.realNodes(backupAll)
+        let realNodes = realPrimary + realBackup
+        let primaryTags = realPrimary.map(\.name)
+        let backupTags = realBackup.map(\.name)
+        let realTags = primaryTags + backupTags
 
         // Groups
         var groupOutbounds: [JSONValue] = []
         var regionNames: [String] = []
         if options.regionGroups {
             for region in Region.all {
-                let members = realNodes.filter { Region.of($0.name) == region }.map(\.name)
+                let members = realPrimary.filter { Region.of($0.name) == region }.map(\.name)
                 guard members.count >= 2 else { continue }
                 regionNames.append(region.groupName)
                 groupOutbounds.append(urltest(region.groupName, members, options))
             }
         }
         var selectorMembers: [String] = []
-        if !realTags.isEmpty {
+        if !primaryTags.isEmpty {
             selectorMembers.append(Groups.auto)
-            groupOutbounds.insert(urltest(Groups.auto, realTags, options), at: 0)
+            groupOutbounds.insert(urltest(Groups.auto, primaryTags, options), at: 0)
         }
-        selectorMembers += regionNames + realTags + [Groups.direct]
+        selectorMembers += regionNames
+        if !backupTags.isEmpty {
+            selectorMembers.append(Groups.backup)
+            groupOutbounds.append(urltest(Groups.backup, backupTags, options))
+        }
+        selectorMembers += realTags + [Groups.direct]
+        let defaultMember = !primaryTags.isEmpty ? Groups.auto : (!backupTags.isEmpty ? Groups.backup : Groups.direct)
         let selector: JSONValue = [
             "type": "selector",
             "tag": .string(Groups.select),
             "outbounds": .array(selectorMembers.map(JSONValue.string)),
-            "default": .string(realTags.isEmpty ? Groups.direct : Groups.auto),
+            "default": .string(defaultMember),
             "interrupt_exist_connections": true,
         ]
 
@@ -123,7 +144,7 @@ public enum ConfigBuilder {
             ["rule_set": [.string(RuleSet.geositeCN.tag)], "server": "dns-local"],
             ["rule_set": [.string(RuleSet.geositeNotCN.tag)], "server": "dns-remote"],
         ]
-        let dns: JSONValue = [
+        var dns: [String: JSONValue] = [
             "servers": [remote, local, ["type": "udp", "tag": "dns-bootstrap", "server": "223.5.5.5"]],
             "rules": .array(dnsRules),
             // Unlisted domains use the fast local resolver; proxied traffic still carries the
@@ -131,6 +152,7 @@ public enum ConfigBuilder {
             "final": "dns-local",
             "strategy": "prefer_ipv4",
         ]
+        if options.optimisticDNS { dns["optimistic"] = true }
 
         // Routing
         var rules: [JSONValue] = [
@@ -178,7 +200,7 @@ public enum ConfigBuilder {
 
         let config: JSONValue = [
             "log": .object(log),
-            "dns": dns,
+            "dns": .object(dns),
             "inbounds": .array(inbounds(options)),
             "outbounds": .array(outbounds),
             "route": [
@@ -190,8 +212,12 @@ public enum ConfigBuilder {
             ],
             "experimental": .object(experimental),
         ]
-        return BuiltConfig(json: config, nodeTags: realTags, nodeOffset: nodeOffset,
-                           groups: [Groups.select] + (realTags.isEmpty ? [] : [Groups.auto]) + regionNames)
+        var built = BuiltConfig(json: config, nodeTags: realTags, nodeOffset: nodeOffset,
+                                groups: [Groups.select] + (primaryTags.isEmpty ? [] : [Groups.auto]) + regionNames
+                                    + (backupTags.isEmpty ? [] : [Groups.backup]))
+        built.backupTags = backupTags
+        built.nodeProtocols = Dictionary(realNodes.map { ($0.name, $0.protocolLabel) }, uniquingKeysWith: { first, _ in first })
+        return built
     }
 
     static func inbounds(_ options: CoreOptions) -> [JSONValue] {
@@ -309,12 +335,15 @@ public enum CheckedBuild {
     }
 
     /// `check` receives each candidate config and returns sing-box's verdict.
-    public static func build(nodes: [ProxyNode], options: CoreOptions, maxDrops: Int = 25,
+    public static func build(nodes: [ProxyNode], backupNodes: [ProxyNode] = [], options: CoreOptions, maxDrops: Int = 25,
                              check: (BuiltConfig) throws -> (ok: Bool, output: String)) throws -> Outcome {
-        var remaining = NodeFilter.uniqued(nodes)
+        // Name both lists jointly once, so a dropped tag can be found in either.
+        let all = NodeFilter.uniqued(nodes + backupNodes)
+        var primary = Array(all.prefix(nodes.count))
+        var backup = Array(all.dropFirst(nodes.count))
         var dropped: [(name: String, reason: String)] = []
         for _ in 0...maxDrops {
-            let built = ConfigBuilder.build(nodes: remaining, options: options)
+            let built = ConfigBuilder.build(nodes: primary, backupNodes: backup, options: options)
             let result = try check(built)
             if result.ok { return Outcome(built: built, dropped: dropped) }
             let reason = CheckError.readable(result.output)
@@ -324,11 +353,15 @@ public enum CheckedBuild {
                 if position >= 0, position < built.nodeTags.count { badTag = built.nodeTags[position] }
             }
             if badTag == nil { badTag = CheckError.outboundTag(in: result.output, among: built.nodeTags) }
-            guard let tag = badTag, let position = remaining.firstIndex(where: { $0.name == tag }) else {
+            guard let tag = badTag else { throw Failure(message: "sing-box 配置检查未通过：\(reason)") }
+            if let position = primary.firstIndex(where: { $0.name == tag }) {
+                primary.remove(at: position)
+            } else if let position = backup.firstIndex(where: { $0.name == tag }) {
+                backup.remove(at: position)
+            } else {
                 throw Failure(message: "sing-box 配置检查未通过：\(reason)")
             }
             dropped.append((tag, reason))
-            remaining.remove(at: position)
         }
         throw Failure(message: "被内核拒绝的节点太多（超过 \(maxDrops) 个），请检查订阅")
     }

@@ -46,6 +46,18 @@ final class AppController: ObservableObject {
     @Published private(set) var speed: (up: Int64, down: Int64) = (0, 0)
     @Published private(set) var hotKeyRegistered = false
 
+    /// 0.3
+    @Published private(set) var nodeProtocols: [String: String] = [:]
+    @Published private(set) var backupTags: [String] = []
+    @Published private(set) var networkCurrent: NetworkFingerprint?
+    /// "已按网络“家里”切到直连模式"
+    @Published private(set) var networkNotice: String?
+    private let networkWatcher = NetworkWatcher()
+    private var appliedNetworkRule: NetworkRule?
+    private var modeBeforeNetworkRule: String?
+    private var stoppedByNetworkRule = false
+    private var switchedToBackup = false
+
     private var exitFetchedAt: Date?
     private var exitKey = ""
     private var nodeFailures: [String: Int] = [:]
@@ -116,6 +128,9 @@ final class AppController: ObservableObject {
             Task { @MainActor in self?.didWake() }
         }
         traffic.onUpdate = { [weak self] up, down in self?.speed = (up, down) }
+        networkWatcher.onChange = { [weak self] fingerprint in self?.networkChanged(fingerprint) }
+        networkWatcher.start()
+        networkWatcher.scheduleCheck(after: 0.5)
         applyHotKey()
         pullFromICloud()
     }
@@ -184,6 +199,7 @@ final class AppController: ObservableObject {
         status = .starting
         restartAttempts = 0
         let nodes = activeNodes()
+        let backup = backupNodes()
         let options = settings.coreOptions
         let tun = settings.tunMode
         // In enhanced mode the TUN interface carries the traffic; the system proxy stays untouched.
@@ -206,7 +222,7 @@ final class AppController: ObservableObject {
                     }
                     try core.freePort(port, label: "代理端口")
                     try core.freePort(apiPort, label: "控制端口")
-                    let prepared = try core.prepare(nodes: nodes, options: options)
+                    let prepared = try core.prepare(nodes: nodes, backupNodes: backup, options: options)
                     try core.start()
                     return prepared
                 }
@@ -217,8 +233,11 @@ final class AppController: ObservableObject {
                 return
             case .success(let prepared):
                 droppedNodes = prepared.dropped
-                loadedNodeCount = nodes.count
+                loadedNodeCount = nodes.count + backup.count
                 configNodeCount = prepared.built.nodeTags.count
+                nodeProtocols = prepared.built.nodeProtocols
+                backupTags = prepared.built.backupTags
+                switchedToBackup = false
                 if prepared.built.nodeTags.isEmpty {
                     core.stop()
                     fail(nodes.isEmpty ? "读不到订阅的节点文件，请在 设置 › 订阅 里右键“立即更新”"
@@ -253,8 +272,8 @@ final class AppController: ObservableObject {
         }
     }
 
-    func disconnect() {
-        settings.wasConnected = false
+    func disconnect(keepWasConnected: Bool = false) {
+        if !keepWasConnected { settings.wasConnected = false }
         status = .stopped
         exitInfo = nil
         nodeNotice = nil
@@ -354,14 +373,112 @@ final class AppController: ObservableObject {
         }
     }
 
-    func testLatency() {
+    func testLatency() { testAllNodes() }
+
+    /// Tests every node: the 自动选择 group (primary) and the backup group, in parallel inside sing-box.
+    func testAllNodes() {
         guard status.isRunning, !testing else { return }
         testing = true
         Task {
             defer { testing = false }
-            let group = snapshot.groups[Groups.auto] != nil ? Groups.auto : Groups.select
-            _ = try? await api.testGroup(group, url: settings.testURL)
+            let groups = [Groups.auto, Groups.backup].filter { snapshot.groups[$0] != nil }
+            for group in groups.isEmpty ? [Groups.select] : groups {
+                _ = try? await api.testGroup(group, url: settings.testURL)
+            }
             await refreshSnapshot()
+        }
+    }
+
+    /// Nodes of the backup subscription, when one is set (not while merging).
+    func backupNodes() -> [ProxyNode] {
+        guard !settings.mergeAllProfiles, let id = settings.backupProfileID, id != selectedProfile?.id,
+              profiles.contains(where: { $0.id == id }) else { return [] }
+        return Store.loadNodes(id)
+    }
+
+    func setBackupProfile(_ id: UUID?) {
+        settings.backupProfileID = id
+        reloadIfRunning()
+    }
+
+    /// Failover between subscriptions: when every primary node fails, 节点选择 moves to 🛟 备用订阅;
+    /// when the primary recovers, back to 自动选择. Checked on menu open, wake, network changes
+    /// and the 15-minute system-scheduled check.
+    func checkFailover() async {
+        guard status.isRunning, !backupTags.isEmpty else { return }
+        await refreshSnapshot()
+        let now = snapshot.groups[Groups.select]?.now
+        guard now == Groups.auto || (now == Groups.backup && switchedToBackup) else { return }
+        let primary = (try? await api.testGroup(Groups.auto, url: settings.testURL, timeoutMs: 5000)) ?? [:]
+        let primaryAlive = primary.values.contains { $0 > 0 }
+        if now == Groups.auto, !primaryAlive {
+            AppLog.write("主用订阅全部不通，切到备用订阅")
+            try? await api.select(Groups.backup, in: Groups.select)
+            switchedToBackup = true
+            nodeNotice = "主用订阅的节点全部不通，已切到备用订阅"
+        } else if now == Groups.backup, primaryAlive {
+            AppLog.write("主用订阅已恢复，切回自动选择")
+            try? await api.select(Groups.auto, in: Groups.select)
+            switchedToBackup = false
+            nodeNotice = "主用订阅已恢复，已切回自动选择"
+        }
+        exitFetchedAt = nil
+        await refreshSnapshot()
+    }
+
+    // MARK: Network rules
+
+    /// Applies the rule for the network just joined, and undoes the previous one when leaving it.
+    private func networkChanged(_ fingerprint: NetworkFingerprint?) {
+        networkCurrent = fingerprint
+        AppLog.write("网络变化：\(fingerprint.map { "\($0.label)（\($0.routerMAC)）" } ?? "无网络")")
+        exitFetchedAt = nil
+        Task {
+            await checkSelectedNode()
+            await checkFailover()
+        }
+        guard settings.networkAutomation else { return }
+        let rule = fingerprint.flatMap { current in settings.networkRules.first { $0.routerMAC == current.routerMAC } }
+        guard rule != appliedNetworkRule else { return }
+        // Leaving a ruled network: put things back unless the new network has its own rule.
+        if appliedNetworkRule != nil {
+            if rule == nil, let mode = modeBeforeNetworkRule { setMode(mode) }
+            if rule == nil || rule?.action.mode == nil { modeBeforeNetworkRule = nil }
+            if stoppedByNetworkRule, rule?.action != .off {
+                stoppedByNetworkRule = false
+                connect()
+            }
+            networkNotice = nil
+        }
+        appliedNetworkRule = rule
+        guard let rule else { return }
+        if let mode = rule.action.mode {
+            if modeBeforeNetworkRule == nil { modeBeforeNetworkRule = settings.mode }
+            if settings.mode != mode { setMode(mode) }
+            networkNotice = "已按网络“\(rule.name)”切到\(rule.action.title)"
+        } else if status.isRunning || status == .starting {
+            stoppedByNetworkRule = true
+            disconnect(keepWasConnected: true)
+            networkNotice = "已按网络“\(rule.name)”关闭代理，离开后自动恢复"
+        }
+        AppLog.write(networkNotice ?? "")
+    }
+
+    /// Saves a rule for the network the Mac is on now.
+    func addRuleForCurrentNetwork(name: String, action: NetworkRule.Action) {
+        guard let current = networkCurrent else { return }
+        settings.networkRules.removeAll { $0.routerMAC == current.routerMAC }
+        settings.networkRules.append(NetworkRule(name: name.isEmpty ? current.label : name, routerMAC: current.routerMAC, action: action))
+        appliedNetworkRule = nil
+        networkChanged(current)
+    }
+
+    func removeNetworkRule(_ id: UUID) {
+        settings.networkRules.removeAll { $0.id == id }
+        if appliedNetworkRule?.id == id {
+            let current = networkCurrent
+            networkChanged(nil)
+            networkChanged(current)
         }
     }
 
@@ -648,11 +765,14 @@ final class AppController: ObservableObject {
                 if nameIfDefault, let name = fetched.suggestedName, !name.isEmpty { profiles[index].name = name }
             }
             saveProfiles()
+            if settings.usageNotifications, let warning = fetched.usage?.warning() {
+                Notifier.notifyOnce(key: "\(id.uuidString)-\(warning)", title: "KongPrism：\(profile.name)", body: warning, settings: &settings)
+            }
             var message = "\(profile.name)：\(fetched.result.nodes.count) 个节点"
             if fetched.result.skipped > 0 { message += "，跳过 \(fetched.result.skipped) 个不支持的" }
             subscriptionTask = .done(message)
             // Restart the core only when the nodes really changed.
-            if changed, settings.mergeAllProfiles || selectedProfile?.id == id { reloadIfRunning() }
+            if changed, settings.mergeAllProfiles || selectedProfile?.id == id || settings.backupProfileID == id { reloadIfRunning() }
         } catch {
             if let index = profiles.firstIndex(where: { $0.id == id }) {
                 profiles[index].lastError = error.localizedDescription

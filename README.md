@@ -39,6 +39,18 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 
 终端走代理：菜单 › 复制终端代理命令，粘贴到终端即可。
 
+### 用链接控制（快捷指令、KongSeek、脚本）
+
+| 链接 | 作用 |
+|---|---|
+| `kongprism://connect` / `disconnect` / `toggle` | 开启 / 关闭 / 切换代理 |
+| `kongprism://mode/rule`、`mode/global`、`mode/direct` | 切换出站模式 |
+| `kongprism://node/香港` | 切到名称（或包含该文字）的节点 |
+| `kongprism://test` | 全部节点测速 |
+| `kongprism://update` | 更新全部订阅 |
+
+在终端里可以 `open kongprism://toggle`。
+
 ## 在线更新的工作方式
 
 | 组件 | 来源 | 校验 | 频率 |

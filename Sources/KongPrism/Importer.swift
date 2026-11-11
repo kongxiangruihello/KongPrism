@@ -72,6 +72,7 @@ enum Importer {
     /// clash://, sing-box://, kongprism:// links from a browser. Asks first, because any web page can open them.
     static func open(_ url: URL, controller: AppController) {
         if url.isFileURL { importFile(url, controller: controller); return }
+        if URLActions.canHandle(url) { URLActions.handle(url, controller: controller); return }
         guard let profile = ImportSource.remoteProfile(fromImportLink: url.absoluteString) else {
             alert("无法识别的导入链接", detail: url.absoluteString)
             return

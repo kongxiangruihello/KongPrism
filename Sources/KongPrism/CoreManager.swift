@@ -84,9 +84,9 @@ final class CoreManager: @unchecked Sendable {
     }
 
     /// Writes the config and runs `sing-box check`, leaving out nodes sing-box rejects.
-    func prepare(nodes: [ProxyNode], options: CoreOptions) throws -> Prepared {
+    func prepare(nodes: [ProxyNode], backupNodes: [ProxyNode] = [], options: CoreOptions) throws -> Prepared {
         guard let binary = binary() else { throw CoreError("找不到 sing-box 内核（应用包内和 Application Support 里都没有）") }
-        let outcome = try CheckedBuild.build(nodes: nodes, options: options) { built in
+        let outcome = try CheckedBuild.build(nodes: nodes, backupNodes: backupNodes, options: options) { built in
             try built.data.write(to: Paths.config, options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Paths.config.path)
             let result = check(Paths.config, with: binary)
@@ -94,6 +94,14 @@ final class CoreManager: @unchecked Sendable {
         }
         for (name, reason) in outcome.dropped { AppLog.write("跳过节点 \(name)：\(reason)") }
         return Prepared(built: outcome.built, dropped: outcome.dropped.map { $0.name })
+    }
+
+    /// `sing-box rule-set match`: whether `host` (domain or IP) is in a rule-set file.
+    func ruleSetContains(_ set: RuleSet, _ host: String) -> Bool {
+        guard let binary = binary() else { return false }
+        let file = Paths.rules.appendingPathComponent(set.file).path
+        let result = Shell.run(binary.path, ["rule-set", "match", "-f", "binary", file, host, "--disable-color"], timeout: 10)
+        return result.ok && result.output.contains("match rules")
     }
 
     // MARK: Process

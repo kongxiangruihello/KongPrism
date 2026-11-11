@@ -107,6 +107,44 @@ struct ClashAPI {
         return delay
     }
 
+    struct Connection: Identifiable, Equatable {
+        let id: String
+        let host: String
+        let network: String
+        let process: String
+        let rule: String
+        let chain: String
+        let upload: Int64
+        let download: Int64
+        let start: Date?
+    }
+
+    func connections() async throws -> (connections: [Connection], upload: Int64, download: Int64) {
+        let data = try await request("/connections")
+        guard let json = JSONValue.parse(data) else { return ([], 0, 0) }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let list = (json["connections"]?.arrayValue ?? []).compactMap { item -> Connection? in
+            guard let id = item["id"]?.stringValue else { return nil }
+            let meta = item["metadata"]
+            let host = meta?["host"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } ?? meta?["destinationIP"]?.stringValue ?? "?"
+            let port = meta?["destinationPort"]?.stringValue ?? ""
+            let chains = item["chains"]?.arrayValue?.compactMap(\.stringValue) ?? []
+            var rule = item["rule"]?.stringValue ?? ""
+            if let payload = item["rulePayload"]?.stringValue, !payload.isEmpty { rule += " " + payload }
+            let process = (meta?["processPath"]?.stringValue).map { ($0 as NSString).lastPathComponent } ?? ""
+            return Connection(id: id, host: port.isEmpty ? host : "\(host):\(port)", network: meta?["network"]?.stringValue ?? "",
+                              process: process, rule: rule, chain: chains.reversed().joined(separator: " → "),
+                              upload: Int64(item["upload"]?.intValue ?? 0), download: Int64(item["download"]?.intValue ?? 0),
+                              start: item["start"]?.stringValue.flatMap { iso.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) })
+        }
+        return (list, Int64(json["uploadTotal"]?.intValue ?? 0), Int64(json["downloadTotal"]?.intValue ?? 0))
+    }
+
+    func closeConnection(_ id: String) async {
+        _ = try? await request("/connections/\(Self.escape(id))", method: "DELETE")
+    }
+
     /// Closes open connections (after switching nodes or modes).
     func closeConnections() async {
         _ = try? await request("/connections", method: "DELETE")

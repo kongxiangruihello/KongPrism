@@ -105,6 +105,13 @@ struct AppSettings: Codable, Equatable {
     /// When the custom rules last changed here (iCloud sync keeps the newer side).
     var rulesChangedAt: Date?
     var lastSyncRead: Date?
+    /// 0.3 features
+    var hideDeadNodes = false
+    var backupProfileID: UUID?
+    var networkRules: [NetworkRule] = []
+    var networkAutomation = true
+    var usageNotifications = true
+    var notifiedWarnings: [String: Date] = [:]
     /// Bumped when a default changes for everyone (see the migration in init(from:)).
     var settingsVersion = AppSettings.currentVersion
 
@@ -151,6 +158,12 @@ struct AppSettings: Codable, Equatable {
         iCloudSync = v(.iCloudSync, d.iCloudSync)
         rulesChangedAt = try? c.decodeIfPresent(Date.self, forKey: .rulesChangedAt)
         lastSyncRead = try? c.decodeIfPresent(Date.self, forKey: .lastSyncRead)
+        hideDeadNodes = v(.hideDeadNodes, d.hideDeadNodes)
+        backupProfileID = try? c.decodeIfPresent(UUID.self, forKey: .backupProfileID)
+        networkRules = v(.networkRules, d.networkRules)
+        networkAutomation = v(.networkAutomation, d.networkAutomation)
+        usageNotifications = v(.usageNotifications, d.usageNotifications)
+        notifiedWarnings = v(.notifiedWarnings, d.notifiedWarnings)
         let version = v(.settingsVersion, 1)
         // 0.1.0 resolved unknown domains through the domestic DNS and sent the IP to the
         // proxy, which broke sites with polluted answers; turn that off once for everyone.

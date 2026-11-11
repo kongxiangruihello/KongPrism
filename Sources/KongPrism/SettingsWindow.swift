@@ -3,11 +3,12 @@ import SwiftUI
 import KongPrismCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case profiles, general, rules, updates, about
+    case profiles, nodes, general, rules, updates, about
     var id: String { rawValue }
     var title: String {
         switch self {
         case .profiles: return "订阅"
+        case .nodes: return "节点"
         case .general: return "常规"
         case .rules: return "分流"
         case .updates: return "更新"
@@ -17,6 +18,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .profiles: return "tray.full"
+        case .nodes: return "point.3.connected.trianglepath.dotted"
         case .general: return "gearshape"
         case .rules: return "arrow.triangle.branch"
         case .updates: return "arrow.down.circle"
@@ -58,6 +60,7 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $selection.tab) {
             ProfilesView().tabItem { Label(SettingsTab.profiles.title, systemImage: SettingsTab.profiles.symbol) }.tag(SettingsTab.profiles)
+            NodesView().tabItem { Label(SettingsTab.nodes.title, systemImage: SettingsTab.nodes.symbol) }.tag(SettingsTab.nodes)
             GeneralView().tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.symbol) }.tag(SettingsTab.general)
             RulesView().tabItem { Label(SettingsTab.rules.title, systemImage: SettingsTab.rules.symbol) }.tag(SettingsTab.rules)
             UpdatesView().tabItem { Label(SettingsTab.updates.title, systemImage: SettingsTab.updates.symbol) }.tag(SettingsTab.updates)
@@ -299,6 +302,10 @@ struct GeneralView: View {
                     .onChange(of: controller.settings.showSpeed) { _ in controller.updateSpeedMonitor() }
                 Text("每秒刷新一次，会多耗一点电；默认关闭。").font(.caption).foregroundStyle(.secondary)
                 Toggle("手选的节点连不上时，自动切回“自动选择”", isOn: $controller.settings.autoFailover)
+                Toggle("订阅快到期或流量快用完时发系统通知", isOn: $controller.settings.usageNotifications)
+            }
+            Section("按网络自动切换") {
+                NetworkRulesView()
             }
             Section("增强模式（TUN）") {
                 Toggle("接管所有程序的流量", isOn: Binding(get: { controller.settings.tunMode }, set: { controller.setTunMode($0) }))
@@ -372,6 +379,9 @@ struct RulesView: View {
 
     var body: some View {
         Form {
+            Section("这个网站走哪条线？") {
+                RouteLookupView()
+            }
             Section("规则") {
                 Toggle("拦截广告域名（geosite-category-ads-all）", isOn: $controller.settings.blockAds)
                 Toggle("未知域名按 IP 归属分流（国内 IP 直连）", isOn: $controller.settings.smartIPRouting)
