@@ -1,9 +1,17 @@
 import AppKit
 
-@MainActor
+// Not @MainActor itself (main.swift creates it synchronously); its NSApplicationDelegate
+// methods run on the main actor, and the main-actor objects are created there.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menu: StatusMenu?
-    private let settings = SettingsWindowController()
+    private var settingsWindow: SettingsWindowController?
+
+    @MainActor private var settings: SettingsWindowController {
+        if let settingsWindow { return settingsWindow }
+        let created = SettingsWindowController()
+        settingsWindow = created
+        return created
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Only one KongPrism at a time: two would fight over the ports and the system proxy.

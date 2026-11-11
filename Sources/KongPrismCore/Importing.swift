@@ -6,6 +6,11 @@ public enum ImportSource {
     public struct RemoteProfile: Equatable, Sendable {
         public let url: String
         public let name: String?
+
+        public init(url: String, name: String?) {
+            self.url = url
+            self.name = name
+        }
     }
 
     /// One-click import links that provider panels put behind "导入到 Clash / sing-box" buttons:

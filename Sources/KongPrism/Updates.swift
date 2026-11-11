@@ -175,8 +175,8 @@ enum CoreUpdater {
 
 private extension Shell {
     /// Runs throwing work off the main thread.
-    static func backgroundThrowing<T>(_ work: @escaping () throws -> T) async -> Result<T, Error> {
-        await background { () -> Result<T, Error> in Result { try work() } }
+    static func backgroundThrowing<T>(_ work: @escaping () throws -> T) async -> Swift.Result<T, Error> {
+        await background { () -> Swift.Result<T, Error> in Swift.Result { try work() } }
     }
 }
 

@@ -69,20 +69,20 @@ final class AppController: ObservableObject {
         if SystemProxy.hasBackup || SystemProxy.isPointing(to: settings.mixedPort) {
             try? SystemProxy.restore(port: settings.mixedPort)
         }
-        Swift.Task { coreVersion = await Shell.background { [core] in core.currentVersion } }
+        Task { coreVersion = await Shell.background { [core] in core.currentVersion } }
         if settings.connectOnLaunch && settings.wasConnected && selectedProfile != nil { connect() }
         scheduler = Scheduler(controller: self)
         scheduler?.start()
         // The scheduler's first run comes one interval after launch; catch up on stale subscriptions now.
         let interval = TimeInterval(max(1, settings.subscriptionIntervalHours)) * 3600
-        Swift.Task {
-            try? await Swift.Task.sleep(nanoseconds: 15_000_000_000)
+        Task {
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
             for profile in profiles where profile.isRemote && Date().timeIntervalSince(profile.updatedAt ?? .distantPast) > interval {
                 try? await updateProfile(profile.id)
             }
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Swift.Task { @MainActor in self?.didWake() }
+            Task { @MainActor in self?.didWake() }
         }
     }
 
@@ -113,7 +113,7 @@ final class AppController: ObservableObject {
         let port = settings.mixedPort
         let apiPort = settings.apiPort
         let core = core
-        Swift.Task {
+        Task {
             let outcome: Result<CoreManager.Prepared, Error> = await Shell.background {
                 Result {
                     for (name, value) in [("代理端口", port), ("控制端口", apiPort)] where !CoreManager.isPortFree(value) {
@@ -156,7 +156,7 @@ final class AppController: ObservableObject {
         status = .stopped
         let port = settings.mixedPort
         let core = core
-        Swift.Task {
+        Task {
             await Shell.background {
                 if SystemProxy.hasBackup { try? SystemProxy.restore(port: port) }
                 core.stop()
@@ -169,7 +169,7 @@ final class AppController: ObservableObject {
         guard status.isRunning else { return }
         status = .stopped
         let core = core
-        Swift.Task {
+        Task {
             await Shell.background { core.stop() }
             connect()
         }
@@ -187,15 +187,15 @@ final class AppController: ObservableObject {
             AppLog.write("第 \(restartAttempts) 次自动重启内核")
             let core = core
             let delay = UInt64(restartAttempts) * 1_000_000_000
-            Swift.Task {
-                try? await Swift.Task.sleep(nanoseconds: delay)
+            Task {
+                try? await Task.sleep(nanoseconds: delay)
                 let result: Result<Void, Error> = await Shell.background { Result { try core.start() } }
                 if case .failure(let error) = result { fail(error.localizedDescription) }
             }
         } else {
             // Do not leave the Mac pointing at a dead proxy.
             let port = settings.mixedPort
-            Swift.Task { await Shell.background { try? SystemProxy.restore(port: port) } }
+            Task { await Shell.background { try? SystemProxy.restore(port: port) } }
             fail("内核反复退出（状态 \(code)），已恢复系统代理。详情见日志。")
         }
     }
@@ -208,7 +208,7 @@ final class AppController: ObservableObject {
     }
 
     func select(_ name: String, in group: String) {
-        Swift.Task {
+        Task {
             do {
                 try await api.select(name, in: group)
                 await refreshSnapshot()
@@ -221,7 +221,7 @@ final class AppController: ObservableObject {
     func setMode(_ mode: String) {
         settings.mode = mode
         guard status.isRunning else { return }
-        Swift.Task {
+        Task {
             try? await api.setMode(mode)
             await api.closeConnections()
         }
@@ -230,7 +230,7 @@ final class AppController: ObservableObject {
     func testLatency() {
         guard status.isRunning, !testing else { return }
         testing = true
-        Swift.Task {
+        Task {
             defer { testing = false }
             let group = snapshot.groups[Groups.auto] != nil ? Groups.auto : Groups.select
             _ = try? await api.testGroup(group, url: settings.testURL)
@@ -398,10 +398,10 @@ final class AppController: ObservableObject {
     func installAppUpdate() {
         guard let found = appRelease else { return }
         appTask = .working("正在下载 KongPrism \(found.release.version)…", 0)
-        Swift.Task {
+        Task {
             do {
                 try await AppUpdater.install(found, token: settings.githubToken, routes: proxyFirst, progress: { value in
-                    Swift.Task { @MainActor in AppController.shared.appTask = .working("正在下载 KongPrism \(found.release.version)…", value) }
+                    Task { @MainActor in AppController.shared.appTask = .working("正在下载 KongPrism \(found.release.version)…", value) }
                 }, beforeQuit: { [weak self] in
                     // "wasConnected" stays set, so the new version reconnects on launch.
                     self?.shutdown()
@@ -433,10 +433,10 @@ final class AppController: ObservableObject {
         guard let version = latestCore else { return }
         coreTask = .working("正在下载 sing-box \(version)…", 0)
         let core = core
-        Swift.Task {
+        Task {
             do {
                 try await CoreUpdater.install(version: version, routes: proxyFirst, core: core) { value in
-                    Swift.Task { @MainActor in AppController.shared.coreTask = .working("正在下载 sing-box \(version)…", value) }
+                    Task { @MainActor in AppController.shared.coreTask = .working("正在下载 sing-box \(version)…", value) }
                 }
                 latestCore = nil
                 coreVersion = await Shell.background { core.currentVersion }
@@ -455,7 +455,7 @@ final class AppController: ObservableObject {
         } catch {
             coreTask = .failed(error.localizedDescription)
         }
-        Swift.Task {
+        Task {
             coreVersion = await Shell.background { [core] in core.currentVersion }
             reloadIfRunning()
         }
@@ -464,7 +464,7 @@ final class AppController: ObservableObject {
     func useBundledCore() {
         CoreUpdater.useBundled()
         coreTask = .done("已改用应用内置的内核")
-        Swift.Task {
+        Task {
             coreVersion = await Shell.background { [core] in core.currentVersion }
             reloadIfRunning()
         }
