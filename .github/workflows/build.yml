@@ -134,6 +134,16 @@ jobs:
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/KongPrism.app
           SHOTS="$PWD/build/walkthrough" bash scripts/ci-walkthrough.sh
 
+      # Also into the log (small JPEGs, base64), for reviewers who cannot download artifacts.
+      - name: Print walkthrough screenshots
+        if: always()
+        run: |
+          for f in build/walkthrough/*.png; do
+            [ -f "$f" ] || continue
+            sips -s format jpeg -s formatOptions 55 -Z 1100 "$f" --out /tmp/shot.jpg >/dev/null
+            echo "SHOT-BEGIN $(basename "$f" .png)"; base64 -i /tmp/shot.jpg | fold -w 1000; echo "SHOT-END"
+          done
+
       - name: Upload walkthrough screenshots
         if: always()
         uses: actions/upload-artifact@v4

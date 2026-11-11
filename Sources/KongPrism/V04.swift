@@ -187,7 +187,7 @@ enum ProblemReport {
             let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
             let zip = desktop.appendingPathComponent("KongPrism-问题报告-\(stamp).zip")
             let result = await Shell.background {
-                Shell.run("/usr/bin/ditto", ["-c", "-k", "--keepParent", folder.path, zip.path])
+                Shell.run("/usr/bin/ditto", ["-c", "-k", "--norsrc", "--noextattr", "--keepParent", folder.path, zip.path])
             }
             try? FileManager.default.removeItem(at: folder)
             if result.ok {
