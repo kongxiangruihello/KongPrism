@@ -7,46 +7,20 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 10
     steps:
-      - name: Does a child process survive when its GUI app quits?
+      - name: Replay the in-app update steps on the published release
         run: |
           set -x
-          mkdir -p /tmp/Probe.app/Contents/MacOS
-          cat > /tmp/Probe.app/Contents/Info.plist <<'PL'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-          <key>CFBundleExecutable</key><string>probe</string>
-          <key>CFBundleIdentifier</key><string>com.example.probe</string>
-          <key>CFBundlePackageType</key><string>APPL</string>
-          <key>LSUIElement</key><true/>
-          </dict></plist>
-          PL
-          cat > /tmp/probe.swift <<'SW'
-          import Foundation
-          // Same as KongPrism's updater: spawn bash with Process, then exit.
-          let p = Process()
-          p.executableURL = URL(fileURLWithPath: "/bin/bash")
-          p.arguments = ["-c", "sleep 4; echo survived > /tmp/probe-plain.txt"]
-          p.standardOutput = FileHandle.nullDevice
-          p.standardError = FileHandle.nullDevice
-          try! p.run()
-          // Variant: detached through launchctl submit.
-          let q = Process()
-          q.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-          q.arguments = ["submit", "-l", "com.example.probe.helper", "--", "/bin/bash", "-c", "sleep 4; echo survived > /tmp/probe-launchctl.txt"]
-          try! q.run(); q.waitUntilExit()
-          // Variant: nohup + background inside bash.
-          let r = Process()
-          r.executableURL = URL(fileURLWithPath: "/bin/bash")
-          r.arguments = ["-c", "nohup bash -c 'sleep 4; echo survived > /tmp/probe-nohup.txt' >/dev/null 2>&1 &"]
-          try! r.run(); r.waitUntilExit()
-          sleep(1)
-          exit(0)
-          SW
-          xcrun swiftc /tmp/probe.swift -o /tmp/Probe.app/Contents/MacOS/probe
-          codesign --force --sign - /tmp/Probe.app
-          open /tmp/Probe.app
-          sleep 9
-          ls -la /tmp/probe-*.txt || true
-          for f in plain launchctl nohup; do test -f /tmp/probe-$f.txt && echo "$f: SURVIVED" || echo "$f: KILLED"; done
-          launchctl remove com.example.probe.helper || true
+          cd /tmp
+          curl -sSL -o latest.json https://github.com/kongxiangruihello/KongPrism/releases/latest/download/latest.json
+          cat latest.json
+          asset=$(python3 -c "import json;print(json.load(open('latest.json'))['asset'])")
+          want=$(python3 -c "import json;print(json.load(open('latest.json'))['sha256'])")
+          curl -sSL -o "$asset" "https://github.com/kongxiangruihello/KongPrism/releases/latest/download/$asset"
+          got=$(shasum -a 256 "$asset" | awk '{print $1}')
+          echo "sha want=$want got=$got"; [ "$want" = "$got" ] && echo "SHA: OK" || echo "SHA: MISMATCH"
+          mkdir work && /usr/bin/ditto -x -k "$asset" work && echo "UNZIP: OK" && ls work
+          /usr/bin/defaults read "$PWD/work/KongPrism.app/Contents/Info" CFBundleIdentifier
+          /usr/bin/defaults read "$PWD/work/KongPrism.app/Contents/Info" CFBundleShortVersionString
+          /usr/bin/codesign --verify --deep work/KongPrism.app; echo "CODESIGN deep exit=$?"
+          /usr/bin/codesign --verify --deep --strict --verbose=4 work/KongPrism.app 2>&1 | tail -5
+          /usr/bin/codesign -dvvv work/KongPrism.app 2>&1 | grep -E "Identifier|Signature|Sealed|flags" 
