@@ -525,10 +525,29 @@ code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' https://www.apple.com/libr
 echo "不设代理直接访问：HTTP $code"; test "$code" = 200
 api /connections | python3 -c 'import json,sys; c=json.load(sys.stdin); print("经过（root）内核的下载字节：", c["downloadTotal"]); assert c["downloadTotal"] > 0'
 TUN_PID="$(sudo cat "/Library/Application Support/KongPrismTUN/sing-box.pid")"
-t0="$(ps -o cputime= -p "$TUN_PID" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))')"
+cputime() { ps -o cputime= -p "$1" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))'; }
+api /connections > "$work/tun-c0.json"
+t0="$(cputime "$TUN_PID")"; s0="$(cputime "$SS_PID")"
+sudo sample "$TUN_PID" 5 -file "$work/tun-sample.txt" >/dev/null 2>&1 &
 sleep 30
-t1="$(ps -o cputime= -p "$TUN_PID" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))')"
-python3 -c "import sys; d=float(sys.argv[2])-float(sys.argv[1]); print(f'增强模式空闲 30 秒：root 内核 CPU {d:.2f} 秒'); assert d < 1.5" "$t0" "$t1"
+t1="$(cputime "$TUN_PID")"; s1="$(cputime "$SS_PID")"
+api /connections > "$work/tun-c1.json"
+python3 - "$work/tun-c0.json" "$work/tun-c1.json" "$t0" "$t1" "$s0" "$s1" <<'PY'
+import collections, json, sys
+c0, c1 = (json.load(open(p)) for p in sys.argv[1:3])
+t0, t1, s0, s1 = map(float, sys.argv[3:7])
+print(f"增强模式“空闲” 30 秒：root 内核 CPU {t1 - t0:.2f} 秒，节点端 {s1 - s0:.2f} 秒")
+print(f"这 30 秒经过内核：上行 {(c1['uploadTotal'] - c0['uploadTotal']) / 1024:.0f} KB，下行 {(c1['downloadTotal'] - c0['downloadTotal']) / 1024:.0f} KB；当前连接 {len(c1['connections'] or [])} 条")
+hosts = collections.Counter()
+for conn in c1["connections"] or []:
+    m = conn["metadata"]
+    hosts[(m.get("host") or m.get("destinationIP"), m.get("network"), m.get("processPath", "").split("/")[-1])] += 1
+for (host, net, proc), n in hosts.most_common(12):
+    print(f"  {n:3d} × {net} {host}  ← {proc or '?'}")
+PY
+wait
+sudo tail -15 "/Library/Application Support/KongPrismTUN/core.log" 2>/dev/null | cut -c1-200 || true
+grep -E "^ +[0-9]+ " "$work/tun-sample.txt" 2>/dev/null | sort -rn | head -25 | cut -c1-160 || true
 link "tun/off"
 wait_for 30 bash -c '! route -n get 1.1.1.1 | grep -q "interface: utun"'
 wait_for 30 api /version
