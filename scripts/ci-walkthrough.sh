@@ -529,6 +529,7 @@ cputime() { ps -o cputime= -p "$1" | python3 -c 'import sys; p=sys.stdin.read().
 api /connections > "$work/tun-c0.json"
 t0="$(cputime "$TUN_PID")"; s0="$(cputime "$SS_PID")"
 sudo sample "$TUN_PID" 5 -file "$work/tun-sample.txt" >/dev/null 2>&1 &
+SAMPLE=$!
 sleep 30
 t1="$(cputime "$TUN_PID")"; s1="$(cputime "$SS_PID")"
 api /connections > "$work/tun-c1.json"
@@ -545,7 +546,7 @@ for conn in c1["connections"] or []:
 for (host, net, proc), n in hosts.most_common(12):
     print(f"  {n:3d} × {net} {host}  ← {proc or '?'}")
 PY
-wait
+wait "$SAMPLE" || true
 sudo tail -15 "/Library/Application Support/KongPrismTUN/core.log" 2>/dev/null | cut -c1-200 || true
 grep -E "^ +[0-9]+ " "$work/tun-sample.txt" 2>/dev/null | sort -rn | head -25 | cut -c1-160 || true
 link "tun/off"
