@@ -520,6 +520,8 @@ python3 -c "import json,sys; assert json.load(open(sys.argv[1]))['favoriteNodes'
 echo "✅ 导入：新增的订阅已下载（5 个节点），收藏按文件替换"
 
 step "增强模式（TUN）：在 App 里开启"
+# The root core uses its own control port (+2), see AppController.activeAPIPort.
+tapi() { curl -sS -m 5 -H "Authorization: Bearer $SECRET" "http://127.0.0.1:$((API + 2))$1"; }
 link "tun/on"
 wait_for 60 bash -c 'test -f /etc/sudoers.d/kongprism'
 wait_for 40 bash -c 'route -n get 1.1.1.1 | grep -q "interface: utun"'
@@ -527,14 +529,14 @@ route -n get 1.1.1.1 | grep interface
 sleep 3
 code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' https://www.apple.com/library/test/success.html)"
 echo "不设代理直接访问：HTTP $code"; test "$code" = 200
-api /connections | python3 -c 'import json,sys; c=json.load(sys.stdin); print("经过（root）内核的下载字节：", c["downloadTotal"]); assert c["downloadTotal"] > 0'
+tapi /connections | python3 -c 'import json,sys; c=json.load(sys.stdin); print("经过（root）内核的下载字节：", c["downloadTotal"]); assert c["downloadTotal"] > 0'
 TUN_PID="$(sudo cat "/Library/Application Support/KongPrismTUN/sing-box.pid")"
 cputime() { ps -o cputime= -p "$1" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))'; }
-api /connections > "$work/tun-c0.json"
+tapi /connections > "$work/tun-c0.json"
 t0="$(cputime "$TUN_PID")"
 sleep 30
 t1="$(cputime "$TUN_PID")"
-api /connections > "$work/tun-c1.json"
+tapi /connections > "$work/tun-c1.json"
 python3 - "$work/tun-c0.json" "$work/tun-c1.json" "$t0" "$t1" <<'PY'
 import collections, json, sys
 c0, c1 = (json.load(open(p)) for p in sys.argv[1:3])
@@ -560,7 +562,11 @@ if ! wait_for 60 api /version; then
   ls -la /etc/sudoers.d/ /Library/PrivilegedHelperTools/ || true
   exit 1
 fi
-grep "等待端口释放" "$SUPPORT/logs/app.log" | tail -1 | cut -c21- || true
+if grep -q "等待端口释放" "$SUPPORT/logs/app.log"; then
+  waited="$(grep "等待端口释放" "$SUPPORT/logs/app.log" | tail -1 | sed -E 's/.*等待端口释放 ([0-9.]+) 秒.*/\1/')"
+  echo "关闭增强模式后等待端口 ${waited} 秒"
+  python3 -c "import sys; assert float(sys.argv[1]) < 5, '关闭增强模式后断网太久'" "$waited"
+fi
 echo "✅ App 内开启增强模式：全部流量经过内核；关闭后 root 内核退出、端口释放、回到系统代理模式"
 
 step "关闭代理，系统代理复原"

@@ -93,7 +93,12 @@ final class AppController: ObservableObject {
         core.onUnexpectedExit = { [weak self] status in self?.coreExited(status) }
     }
 
-    var api: ClashAPI { ClashAPI(port: settings.apiPort, secret: settings.apiSecret) }
+    var api: ClashAPI { ClashAPI(port: activeAPIPort, secret: settings.apiSecret) }
+
+    /// The control port of the running core. The root core of enhanced mode uses its own (+2, and +3
+    /// for the AI check): after it exits, macOS keeps its sockets in TIME_WAIT for about 30 seconds
+    /// and a non-root core cannot bind that port meanwhile (CI measured 30.1 s without the offset).
+    var activeAPIPort: Int { (core.tunMode ? 2 : 0) + settings.apiPort }
 
     var selectedProfile: Profile? {
         profiles.first { $0.id == settings.selectedProfileID } ?? profiles.first
@@ -255,14 +260,16 @@ final class AppController: ObservableObject {
         options.testIntervalMinutes = PowerPolicy.testInterval(base: settings.testIntervalMinutes, saving: saving)
         appliedPowerSaving = saving
         // 0.9: a local-only inbound that leaves like AI traffic (诊断 › AI 服务出口).
-        let checkPort = settings.apiPort + 1
+        let tunAPIOffset = settings.tunMode ? 2 : 0
+        options.apiPort = settings.apiPort + tunAPIOffset
+        let checkPort = options.apiPort + 1
         options.aiCheckPort = settings.aiExitCheck && checkPort != settings.mixedPort && CoreManager.isPortFree(checkPort) ? checkPort : nil
         aiCheckPort = options.aiCheckPort
         let tun = settings.tunMode
         // In enhanced mode the TUN interface carries the traffic; the system proxy stays untouched.
         let setProxy = settings.setSystemProxy && !tun
         let port = settings.mixedPort
-        let apiPort = settings.apiPort
+        let apiPort = options.apiPort
         let core = core
         if tun && !TunHelper.isInstalled {
             fail("增强模式还没有安装辅助程序：请在 设置 › 网络 里重新打开“增强模式”")
@@ -384,7 +391,8 @@ final class AppController: ObservableObject {
             let core = core
             let started = Date()
             let port = settings.mixedPort
-            let ports: [Int] = [settings.mixedPort, settings.apiPort] + (settings.aiExitCheck ? [settings.apiPort + 1] : [Int]())
+            let next = settings.apiPort + (settings.tunMode ? 2 : 0)
+            let ports: [Int] = [settings.mixedPort, next] + (settings.aiExitCheck ? [next + 1] : [Int]())
             // Switching to enhanced mode: the TUN interface replaces the system proxy.
             let restoreProxy = settings.tunMode
             // Leaving enhanced mode: the root core's ports stay unbindable for several seconds after it exits (CI).
