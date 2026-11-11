@@ -69,6 +69,9 @@ enum AppLog {
                 handle.write(Data(line.utf8))
                 try? handle.close()
             } else {
+                // The first lines of a fresh install come before Paths.prepare(): create the folder.
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                         attributes: [.posixPermissions: 0o700])
                 try? Data(line.utf8).write(to: url)
             }
         }
