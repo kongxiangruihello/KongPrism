@@ -1,0 +1,193 @@
+import Foundation
+import KongPrismCore
+
+/// Where KongPrism keeps its files: ~/Library/Application Support/KongPrism.
+enum Paths {
+    static let support: URL = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("KongPrism", isDirectory: true)
+    }()
+
+    static var settings: URL { support.appendingPathComponent("settings.json") }
+    static var profiles: URL { support.appendingPathComponent("profiles.json") }
+    static var profileNodes: URL { support.appendingPathComponent("profiles", isDirectory: true) }
+    static var rules: URL { support.appendingPathComponent("rules", isDirectory: true) }
+    static var core: URL { support.appendingPathComponent("core", isDirectory: true) }
+    static var downloadedCore: URL { core.appendingPathComponent("sing-box") }
+    static var previousCore: URL { core.appendingPathComponent("sing-box.previous") }
+    static var runtime: URL { support.appendingPathComponent("runtime", isDirectory: true) }
+    static var config: URL { runtime.appendingPathComponent("config.json") }
+    static var cache: URL { runtime.appendingPathComponent("cache.db") }
+    static var pidFile: URL { runtime.appendingPathComponent("sing-box.pid") }
+    static var proxyBackup: URL { support.appendingPathComponent("system-proxy-backup.json") }
+    static var logs: URL { support.appendingPathComponent("logs", isDirectory: true) }
+    static var coreLog: URL { logs.appendingPathComponent("core.log") }
+    static var appLog: URL { logs.appendingPathComponent("app.log") }
+    static var updates: URL { support.appendingPathComponent("updates", isDirectory: true) }
+
+    static var bundledCore: URL? { Bundle.main.url(forAuxiliaryExecutable: "sing-box") }
+    static var bundledRules: URL? { Bundle.main.resourceURL?.appendingPathComponent("rules", isDirectory: true) }
+
+    static func prepare() {
+        let fm = FileManager.default
+        for directory in [support, profileNodes, rules, core, runtime, logs, updates] {
+            try? fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+        // Subscription links carry account tokens; keep the folder private.
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: support.path)
+    }
+}
+
+/// A small append-only log in logs/app.log (trimmed when it grows past 1 MB).
+enum AppLog {
+    private static let queue = DispatchQueue(label: "KongPrism.log", qos: .utility)
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    static func write(_ message: String) {
+        let line = "\(formatter.string(from: Date())) \(message)\n"
+        queue.async {
+            let url = Paths.appLog
+            if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 1_000_000 {
+                try? FileManager.default.removeItem(at: url)
+            }
+            if let handle = try? FileHandle(forWritingTo: url) {
+                handle.seekToEndOfFile()
+                handle.write(Data(line.utf8))
+                try? handle.close()
+            } else {
+                try? Data(line.utf8).write(to: url)
+            }
+        }
+    }
+}
+
+// MARK: - Settings
+
+struct AppSettings: Codable, Equatable {
+    var mixedPort = 7899
+    var apiPort = 9099
+    var apiSecret = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    var allowLAN = false
+    var mode = "Rule"
+    var blockAds = true
+    var smartIPRouting = true
+    var regionGroups = true
+    var remoteDNS = "https://1.1.1.1/dns-query"
+    var localDNS = "https://223.5.5.5/dns-query"
+    var testURL = "https://www.gstatic.com/generate_204"
+    var testIntervalMinutes = 10
+    var logLevel = "warn"
+    var setSystemProxy = true
+    var connectOnLaunch = true
+    var wasConnected = false
+    var selectedProfileID: UUID?
+    var mergeAllProfiles = false
+    var subscriptionIntervalHours = 12
+    var autoUpdateRules = true
+    var autoCheckAppUpdates = true
+    var autoCheckCoreUpdates = true
+    var githubToken = ""
+    var directDomains: [String] = []
+    var proxyDomains: [String] = []
+    var rulesUpdatedAt: Date?
+
+    init() {}
+
+    // Every field falls back to its default, so older settings files keep loading.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppSettings()
+        func v<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T { (try? c.decodeIfPresent(T.self, forKey: key)) ?? fallback }
+        mixedPort = v(.mixedPort, d.mixedPort)
+        apiPort = v(.apiPort, d.apiPort)
+        apiSecret = v(.apiSecret, d.apiSecret)
+        allowLAN = v(.allowLAN, d.allowLAN)
+        mode = v(.mode, d.mode)
+        blockAds = v(.blockAds, d.blockAds)
+        smartIPRouting = v(.smartIPRouting, d.smartIPRouting)
+        regionGroups = v(.regionGroups, d.regionGroups)
+        remoteDNS = v(.remoteDNS, d.remoteDNS)
+        localDNS = v(.localDNS, d.localDNS)
+        testURL = v(.testURL, d.testURL)
+        testIntervalMinutes = v(.testIntervalMinutes, d.testIntervalMinutes)
+        logLevel = v(.logLevel, d.logLevel)
+        setSystemProxy = v(.setSystemProxy, d.setSystemProxy)
+        connectOnLaunch = v(.connectOnLaunch, d.connectOnLaunch)
+        wasConnected = v(.wasConnected, d.wasConnected)
+        selectedProfileID = try? c.decodeIfPresent(UUID.self, forKey: .selectedProfileID)
+        mergeAllProfiles = v(.mergeAllProfiles, d.mergeAllProfiles)
+        subscriptionIntervalHours = v(.subscriptionIntervalHours, d.subscriptionIntervalHours)
+        autoUpdateRules = v(.autoUpdateRules, d.autoUpdateRules)
+        autoCheckAppUpdates = v(.autoCheckAppUpdates, d.autoCheckAppUpdates)
+        autoCheckCoreUpdates = v(.autoCheckCoreUpdates, d.autoCheckCoreUpdates)
+        githubToken = v(.githubToken, d.githubToken)
+        directDomains = v(.directDomains, d.directDomains)
+        proxyDomains = v(.proxyDomains, d.proxyDomains)
+        rulesUpdatedAt = try? c.decodeIfPresent(Date.self, forKey: .rulesUpdatedAt)
+    }
+
+    var coreOptions: CoreOptions {
+        var options = CoreOptions()
+        options.mixedPort = mixedPort
+        options.allowLAN = allowLAN
+        options.apiPort = apiPort
+        options.apiSecret = apiSecret
+        options.mode = mode
+        options.blockAds = blockAds
+        options.smartIPRouting = smartIPRouting
+        options.regionGroups = regionGroups
+        options.remoteDNS = remoteDNS
+        options.localDNS = localDNS
+        options.testURL = testURL
+        options.testIntervalMinutes = testIntervalMinutes
+        options.logLevel = logLevel
+        options.logPath = Paths.coreLog.path
+        options.rulesDirectory = Paths.rules.path
+        options.cachePath = Paths.cache.path
+        options.directDomains = directDomains
+        options.proxyDomains = proxyDomains
+        return options
+    }
+}
+
+struct Profile: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var name: String
+    /// nil for nodes pasted in by hand.
+    var url: String?
+    var userAgent: String?
+    var updatedAt: Date?
+    var usage: SubscriptionUsage?
+    var nodeCount = 0
+    var format: String?
+    var skipped = 0
+    var lastError: String?
+
+    var isRemote: Bool { url != nil }
+}
+
+enum Store {
+    static func load<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(type, from: data)
+    }
+
+    static func save<T: Encodable>(_ value: T, to url: URL) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(value) else { return }
+        try? data.write(to: url, options: [.atomic])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    static func nodesURL(_ id: UUID) -> URL { Paths.profileNodes.appendingPathComponent("\(id.uuidString).json") }
+    static func loadNodes(_ id: UUID) -> [ProxyNode] { load([ProxyNode].self, from: nodesURL(id)) ?? [] }
+    static func saveNodes(_ nodes: [ProxyNode], for id: UUID) { save(nodes, to: nodesURL(id)) }
+}

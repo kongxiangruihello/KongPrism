@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="40" y="40" width="944" height="944" rx="220" fill="#4078F0"/>
+  <!-- incoming beam -->
+  <line x1="120" y1="560" x2="330" y2="525" stroke="#F7F9FF" stroke-width="34" stroke-linecap="round"/>
+  <!-- three outgoing rays -->
+  <g stroke-linecap="round" stroke-width="34">
+    <line x1="700" y1="520" x2="900" y2="400" stroke="#F7F9FF"/>
+    <line x1="700" y1="540" x2="910" y2="540" stroke="#F7F9FF" stroke-opacity="0.85"/>
+    <line x1="700" y1="560" x2="900" y2="680" stroke="#F7F9FF" stroke-opacity="0.7"/>
+  </g>
+  <!-- prism -->
+  <path d="M512 215 L760 735 L264 735 Z" fill="#4078F0" stroke="#F7F9FF" stroke-width="58" stroke-linejoin="round"/>
+  <!-- k -->
+  <g fill="#F7F9FF">
+    <rect x="452" y="430" width="44" height="200"/>
+    <path d="M496 548 L556 482 L606 482 L534 556 L612 630 L560 630 L496 566 Z"/>
+  </g>
+</svg>

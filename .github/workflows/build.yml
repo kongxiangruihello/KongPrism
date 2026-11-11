@@ -1,0 +1,64 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcrun swift --version
+
+      - name: Test and build
+        env:
+          KONGPRISM_ARCH: arm64
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then export KONGPRISM_VERSION="${GITHUB_REF_NAME#v}"; fi
+          bash scripts/build-app.sh --test --zip
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: KongPrism
+          path: |
+            build/KongPrism-*.zip
+            build/build.log
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          zip="build/KongPrism-$version.zip"
+          sha="$(cat "$zip.sha256")"
+          build="$(git rev-list --count HEAD)"
+          # Release notes: the CHANGELOG section of this version.
+          awk -v v="$version" '$0 ~ "^## " v "( |$)" {p=1; next} /^## / {if (p) exit} p' CHANGELOG.md > notes.md || true
+          [[ -s notes.md ]] || echo "KongPrism $version" > notes.md
+          python3 - "$version" "$build" "$sha" "KongPrism-$version.zip" <<'PY'
+          import json, sys
+          version, build, sha, asset = sys.argv[1:5]
+          notes = open("notes.md", encoding="utf-8").read().strip()
+          json.dump({"version": version, "build": int(build), "notes": notes, "asset": asset,
+                     "sha256": sha, "minimumSystemVersion": "13.0"},
+                    open("latest.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          PY
+          cat latest.json
+          gh release create "$GITHUB_REF_NAME" "$zip" latest.json --title "KongPrism $version" --notes-file notes.md

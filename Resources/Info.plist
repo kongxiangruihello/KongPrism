@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>KongPrism</string>
+	<key>CFBundleExecutable</key>
+	<string>KongPrism</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.kongxiangrui.KongPrism</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>KongPrism</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.kongxiangrui.KongPrism.import</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>kongprism</string>
+				<string>clash</string>
+				<string>clash-meta</string>
+				<string>clashx</string>
+				<string>mihomo</string>
+				<string>sing-box</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Proxy configuration</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.yaml</string>
+				<string>public.json</string>
+				<string>public.plain-text</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>需要管理员授权时，KongPrism 通过系统对话框修改代理设置。</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>KongPrism · sing-box 内核（GPL-3.0）</string>
+</dict>
+</plist>
