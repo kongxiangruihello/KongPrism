@@ -414,7 +414,11 @@ struct UpdatesView: View {
                 }
                 JobLine(job: controller.appTask)
                 Toggle("每天自动检查", isOn: $controller.settings.autoCheckAppUpdates)
-                SecureField("GitHub 令牌（仓库为私有时需要，只读权限即可）", text: $controller.settings.githubToken)
+                LabeledContent("GitHub 令牌（可选）") {
+                    SecureField("仓库公开时不用填", text: $controller.settings.githubToken)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
+                }
                 Text("更新包从 GitHub Releases 下载，校验 SHA-256 和签名后替换，并在重启后自动恢复连接。下载优先走代理。")
                     .font(.caption).foregroundStyle(.secondary)
             }
