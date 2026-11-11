@@ -18,7 +18,7 @@ SUBPORT=18080
 SSPORT=18388
 mkdir -p "$SHOTS"
 work="$(mktemp -d)"
-step() { echo; echo "=== $* ==="; }
+step() { echo; echo "=== $* === $(date +%H:%M:%S)"; }
 api() { curl -sS -m 5 -H "Authorization: Bearer $SECRET" "http://127.0.0.1:$API$1"; }
 wait_for() { # wait_for <seconds> <command…>
   local seconds="$1"; shift
@@ -239,7 +239,9 @@ echo "✅ 长连接被断开（应用会立即重连），并重新测速：$(gr
 
 step "多次改动合并成一次重载，并测断线时长"
 n0="$(grep -c "sing-box 已启动" "$SUPPORT/logs/app.log")"
-open "kongprism://reload" & open "kongprism://reload" & open "kongprism://reload" & wait
+# In parallel (all within the 1.2 s window); wait only for these three, not the servers in the background.
+open "kongprism://reload" & r1=$!; open "kongprism://reload" & r2=$!; open "kongprism://reload" & r3=$!
+wait "$r1" "$r2" "$r3"
 python3 - "$API" "$SECRET" <<'PY'
 import sys, time, urllib.request
 port, secret = sys.argv[1], sys.argv[2]
