@@ -202,6 +202,31 @@ final class CoreManager: @unchecked Sendable {
     /// True when nothing accepts connections on 127.0.0.1:`port`.
     /// (A bind test would also fail while closed connections linger in TIME_WAIT after the
     /// previous core stopped, which sing-box itself does not mind.)
+    /// Whether a listener could bind 127.0.0.1:port right now (SO_REUSEADDR, like sing-box). A port
+    /// can stay taken for a moment after its owner exited (seen after stopping the root core).
+    static func canBind(_ port: Int) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return true }
+        defer { close(fd) }
+        var yes: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        return result == 0
+    }
+
+    /// Waits (up to `seconds`) until every port can be bound.
+    static func waitForPorts(_ ports: [Int], seconds: Double = 5) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline, !ports.allSatisfy(canBind) { usleep(100_000) }
+    }
+
     static func isPortFree(_ port: Int) -> Bool {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return true }

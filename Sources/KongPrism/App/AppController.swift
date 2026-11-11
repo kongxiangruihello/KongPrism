@@ -384,6 +384,7 @@ final class AppController: ObservableObject {
             let core = core
             let started = Date()
             let port = settings.mixedPort
+            let ports = [settings.mixedPort, settings.apiPort] + (settings.aiExitCheck ? [settings.apiPort + 1] : [])
             // Switching to enhanced mode: the TUN interface replaces the system proxy.
             let restoreProxy = settings.tunMode
             await sampleTraffic(force: true)
@@ -391,6 +392,8 @@ final class AppController: ObservableObject {
             await Shell.background {
                 core.stop()
                 if restoreProxy, SystemProxy.hasBackup { try? SystemProxy.restore(port: port) }
+                // The stopped core's ports can stay taken for a moment (root core in particular).
+                CoreManager.waitForPorts(ports)
             }
             connect()
             AppLog.write("内核重载（停止用时 \(Int(Date().timeIntervalSince(started) * 1000)) ms）")
