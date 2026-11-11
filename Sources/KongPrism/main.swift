@@ -1,4 +1,5 @@
 import AppKit
+import KongPrismCore
 
 // Not @MainActor itself (main.swift creates it synchronously); its NSApplicationDelegate
 // methods run on the main actor, and the main-actor objects are created there.
@@ -16,12 +17,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Only one KongPrism at a time: two would fight over the ports and the system proxy.
+        // A newer copy takes over from older ones (e.g. a 0.1.x still running from Downloads);
+        // otherwise this copy steps aside.
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         if !others.isEmpty {
-            others.first?.activate()
-            NSApp.terminate(nil)
-            return
+            func version(of app: NSRunningApplication) -> String {
+                guard let url = app.bundleURL, let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist")) else { return "0" }
+                return info["CFBundleShortVersionString"] as? String ?? "0"
+            }
+            let olderOnly = others.allSatisfy { Versions.isNewer(AppUpdater.version, than: version(of: $0)) }
+            guard olderOnly else {
+                others.first?.activate()
+                NSApp.terminate(nil)
+                return
+            }
+            AppLog.write("接管旧版本：\(others.map { "\(version(of: $0)) @ \($0.bundleURL?.path ?? "?")" }.joined(separator: "、"))")
+            for app in others { app.terminate() }
+            let deadline = Date().addingTimeInterval(6)
+            while others.contains(where: { !$0.isTerminated }), Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            for app in others where !app.isTerminated { app.forceTerminate() }
         }
         AppLog.write("KongPrism \(AppUpdater.version)（\(AppUpdater.build)）启动")
         let menu = StatusMenu()
