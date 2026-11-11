@@ -65,7 +65,10 @@ enum Diagnostics {
             if profile.skipped > 0 { text += "，跳过 \(profile.skipped) 个不支持的" }
             if let host = profile.url.flatMap({ URL(string: $0)?.host }) { text += "，订阅域名 \(host)" }
             lines.append(Line(ok: profile.nodeCount > 0, text: text))
-            if let error = profile.lastError { lines.append(Line(ok: false, text: "上次更新失败：\(error)")) }
+            if let error = profile.lastError {
+                let when = profile.lastErrorAt.map { $0.formatted(date: Calendar.current.isDateInToday($0) ? .omitted : .abbreviated, time: .shortened) + " " } ?? ""
+                lines.append(Line(ok: false, text: "\(when)更新失败：\(error)"))
+            }
             if let until = profile.pausedUntil, until > Date() {
                 lines.append(Line(ok: nil, text: "订阅服务器上次拒绝了请求，自动更新暂停到 \(until.formatted(date: .omitted, time: .shortened))（手动“立即更新”不受影响）"))
             }
@@ -108,7 +111,23 @@ enum Diagnostics {
         if total > 0, let delays = try? await controller.api.testGroup(Groups.auto, url: settings.testURL, timeoutMs: 5000) {
             let alive = delays.filter { $0.value > 0 }
             let best = alive.min { $0.value < $1.value }
-            var text = "节点测速：\(alive.count)/\(total) 个可用"
+            // Say what the test covered: 自动选择 may leave nodes out (multiplier limit, avoided nodes).
+            let configured = max(controller.configNodeCount, total)
+            var scope = "自动选择范围内 \(total) 个"
+            if configured > total {
+                var reasons: [String] = []
+                let limit = settings.maxMultiplier
+                let auto = Set(snapshot.groups[Groups.auto]?.all ?? [])
+                let outside = (snapshot.groups[Groups.select]?.all ?? []).filter { name in snapshot.groups[name] == nil && name != Groups.direct && !auto.contains(name) }
+                let byRate = limit > 0 ? outside.filter { name in (NodeFilter.multiplier(name) ?? 0) > limit }.count : 0
+                let byAvoid = outside.filter { name in (controller.avoidedNodes[name] ?? .distantPast) > Date() }.count
+                if byRate > 0 { reasons.append("\(byRate) 个因倍率上限") }
+                if byAvoid > 0 { reasons.append("\(byAvoid) 个因暂时避开") }
+                let rest = configured - total - byRate - byAvoid
+                if rest > 0 { reasons.append("\(rest) 个属于备用订阅或其他原因") }
+                scope += "（另有 \(reasons.joined(separator: "、"))不在范围内）"
+            }
+            var text = "节点测速（\(scope)）：\(alive.count)/\(total) 个可用"
             if let best { text += "，最快 \(best.key) \(best.value) ms" }
             if alive.isEmpty { text += "。全部不通：订阅可能过期，或节点协议转换有问题（把本报告发给开发者）" }
             lines.append(Line(ok: !alive.isEmpty, text: text))
@@ -137,7 +156,8 @@ enum Diagnostics {
             lines.append(Line(ok: TunHelper.isInstalled ? nil : false,
                               text: TunHelper.isInstalled ? "增强模式（TUN）已开启" : "增强模式已开启，但辅助程序没有安装"))
         }
-        if let log = try? String(contentsOf: controller.core.logURL, encoding: .utf8) {
+        let coreLog = LogTail.read(controller.core.logURL, bytes: 4 * 1024 * 1024)
+        if !coreLog.isEmpty, let log = Optional(coreLog) {
             // Which nodes failed to connect, apart from the bursts logged while the Mac slept or switched networks.
             let stats = CoreLogStats.summarize(log)
             if let worst = stats.nodes.first {

@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = AppController.shared
         controller.launch()
         AppUpdater.reportLastUpdate(controller: controller)
+        WhatsNewNotice.check()
         if controller.profiles.isEmpty {
             // 新手引导：添加订阅 → 开启代理 → 验证 Google；也提示位置和其他代理软件。
             Onboarding.show()

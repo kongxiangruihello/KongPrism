@@ -227,7 +227,10 @@ struct ProfileRow: View {
                 Text(profile.name).fontWeight(selected ? .semibold : .regular)
                 Text(detail).font(.caption).foregroundStyle(.secondary)
                 if let usage = profile.usage { Text(usage.summary).font(.caption).foregroundStyle(.secondary) }
-                if let error = profile.lastError { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
+                if let error = profile.lastError {
+                    let when = profile.lastErrorAt.map { $0.formatted(date: .abbreviated, time: .shortened) + " " } ?? ""
+                    Text("\(when)\(ErrorSummary.short(error))：\(error)").font(.caption).foregroundStyle(.red).lineLimit(2).help(error)
+                }
             }
             Spacer()
         }
@@ -501,6 +504,15 @@ struct UpdatesView: View {
                 }
                 Text("更新包从 GitHub Releases 下载，校验 SHA-256 和签名后替换，并在重启后自动恢复连接。下载优先走代理。")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("新功能") {
+                ForEach(WhatsNew.items(after: "0.5.1", upTo: AppUpdater.version).prefix(6), id: \.text) { item in
+                    HStack {
+                        Text(item.version).font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                        Text(item.text).font(.callout)
+                    }
+                }
+                Button("查看全部新功能…") { WhatsNewNotice.show() }
             }
             Section("sing-box 内核") {
                 HStack {

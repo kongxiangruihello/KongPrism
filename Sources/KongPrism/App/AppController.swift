@@ -24,7 +24,7 @@ final class AppController: ObservableObject {
     }
 
     @Published private(set) var status: Status = .stopped
-    @Published var settings: AppSettings { didSet { if settings != oldValue { Store.save(settings, to: Paths.settings) } } }
+    @Published var settings: AppSettings { didSet { if settings != oldValue { Store.save(Secrets.forDisk(settings), to: Paths.settings) } } }
     @Published private(set) var profiles: [Profile] = []
     @Published private(set) var snapshot = ClashAPI.Snapshot()
     @Published private(set) var droppedNodes: [String] = []
@@ -82,9 +82,11 @@ final class AppController: ObservableObject {
 
     private init() {
         Paths.prepare()
-        settings = Store.load(AppSettings.self, from: Paths.settings) ?? AppSettings()
-        profiles = Store.load([Profile].self, from: Paths.profiles) ?? []
-        Store.save(settings, to: Paths.settings)
+        settings = Secrets.restore(Store.load(AppSettings.self, from: Paths.settings) ?? AppSettings())
+        profiles = Secrets.restore(Store.load([Profile].self, from: Paths.profiles) ?? [])
+        // Also moves links and the token of older versions out of the files (0.8).
+        Store.save(Secrets.forDisk(settings), to: Paths.settings)
+        if !profiles.isEmpty { Store.save(Secrets.forDisk(profiles), to: Paths.profiles) }
         core.onUnexpectedExit = { [weak self] status in self?.coreExited(status) }
     }
 
@@ -662,7 +664,7 @@ final class AppController: ObservableObject {
     // MARK: Profiles
 
     private func saveProfiles() {
-        Store.save(profiles, to: Paths.profiles)
+        Store.save(Secrets.forDisk(profiles), to: Paths.profiles)
         pushToICloud()
     }
 
@@ -759,7 +761,7 @@ final class AppController: ObservableObject {
             }
         }
         guard !added.isEmpty else { return }
-        Store.save(profiles, to: Paths.profiles)
+        Store.save(Secrets.forDisk(profiles), to: Paths.profiles)
         AppLog.write("从 iCloud 云盘（\(payload.device)）同步了 \(added.count) 个订阅")
         subscriptionTask = .done("从 iCloud 云盘同步了 \(added.count) 个订阅")
         Task { for id in added { try? await updateProfile(id) } }
@@ -900,6 +902,7 @@ final class AppController: ObservableObject {
     func deleteProfile(_ id: UUID) {
         let wasSelected = selectedProfile?.id == id
         profiles.removeAll { $0.id == id }
+        Secrets.delete(Secrets.subscriptionAccount(id))
         try? FileManager.default.removeItem(at: Store.nodesURL(id))
         saveProfiles()
         if wasSelected {
@@ -908,7 +911,7 @@ final class AppController: ObservableObject {
         }
     }
 
-    func updateProfile(_ id: UUID, nameIfDefault: Bool = false, automatic: Bool = false) async throws {
+    func updateProfile(_ id: UUID, nameIfDefault: Bool = false, automatic: Bool = false, isRetry: Bool = false) async throws {
         guard let profile = profiles.first(where: { $0.id == id }), let url = profile.url else { return }
         if automatic, let until = profile.pausedUntil, until > Date() { return }
         subscriptionTask = .working("正在更新 \(profile.name)…", nil)
@@ -927,6 +930,7 @@ final class AppController: ObservableObject {
                 profiles[index].pausedUntil = nil
                 profiles[index].updatedAt = Date()
                 profiles[index].lastError = nil
+                profiles[index].lastErrorAt = nil
                 profiles[index].workingUserAgent = fetched.agent
                 if nameIfDefault, let name = fetched.suggestedName, !name.isEmpty { profiles[index].name = name }
             }
@@ -940,8 +944,10 @@ final class AppController: ObservableObject {
             // Restart the core only when the nodes really changed.
             if changed, settings.mergeAllProfiles || selectedProfile?.id == id || settings.backupProfileID == id { reloadIfRunning() }
         } catch {
+            let kind = Self.failureKind(error)
             if let index = profiles.firstIndex(where: { $0.id == id }) {
                 profiles[index].lastError = error.localizedDescription
+                profiles[index].lastErrorAt = Date()
                 if automatic, let refused = error as? SubscriptionFetcher.Refused {
                     // Wait as long as the server asked (Retry-After), otherwise three hours.
                     let wait = UpdatePause.duration(retryAfter: refused.retryAfter)
@@ -950,6 +956,18 @@ final class AppController: ObservableObject {
                 }
                 saveProfiles()
             }
+            // A network hiccup (timeout, TLS, 5xx): one more try in ten minutes instead of waiting for
+            // the next scheduled update (hours away). Only one retry per failure.
+            if kind == .transient, !isRetry {
+                // Hidden `subscriptionRetrySeconds` default: CI shortens the wait.
+                let custom = UserDefaults.standard.double(forKey: "subscriptionRetrySeconds")
+                let wait = custom > 0 ? custom : FailureKind.retryDelay
+                AppLog.write("订阅“\(profile.name)”暂时连不上，\(wait >= 60 ? "\(Int(wait / 60)) 分钟" : "\(Int(wait)) 秒")后重试")
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                    try? await self?.updateProfile(id, automatic: true, isRetry: true)
+                }
+            }
             var message = "\(profile.name) 更新失败：\(error.localizedDescription)"
             if error is URLError, !status.isRunning {
                 message += "。订阅域名可能在国内直连不通：可先开着其他代理软件（如 KongBabel）再点“立即更新”，KongPrism 会借用系统代理下载"
@@ -957,6 +975,25 @@ final class AppController: ObservableObject {
             subscriptionTask = .failed(message)
             throw error
         }
+    }
+
+    /// Refused / transient / other (see FailureKind).
+    static func failureKind(_ error: Error) -> FailureKind {
+        if error is SubscriptionFetcher.Refused { return .refused }
+        if let http = error as? Net.HTTPError { return FailureKind.classify(httpStatus: http.status) }
+        if let url = error as? URLError { return FailureKind.classify(urlErrorCode: url.code.rawValue) }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain { return FailureKind.classify(urlErrorCode: ns.code) }
+        return .other
+    }
+
+    /// The subscription downloaded fine somewhere else (问题报告): an old error no longer applies.
+    func markSubscriptionReachable(_ id: UUID, agent: String) {
+        guard let index = profiles.firstIndex(where: { $0.id == id }), profiles[index].lastError != nil else { return }
+        profiles[index].lastError = nil
+        profiles[index].lastErrorAt = nil
+        profiles[index].workingUserAgent = agent
+        saveProfiles()
     }
 
     func updateAllProfiles(automatic: Bool = false) async {

@@ -5,6 +5,7 @@
   /limited.yaml      429 Too Many Requests, Retry-After: 120
   /refused.yaml      403 with a "访问受限" page (like the user's provider)
   /slow              sends a byte every second for a minute (a long-lived connection)
+  /flaky.yaml        503 for the first request, then sub.yaml
   /count?path=/x     how many times /x was requested
 """
 import collections, http.server, os, sys, threading, time, urllib.parse
@@ -41,6 +42,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_text(429, "Too Many Requests", [("Retry-After", "120")])
         if url.path == "/refused.yaml":
             return self.send_text(403, "访问受限 REF: CI-TEST")
+        if url.path == "/flaky.yaml":
+            if hits[url.path] <= 1:
+                return self.send_text(503, "Service Unavailable")
+            self.path = "/sub.yaml"
+            return super().do_GET()
         if url.path == "/slow":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")

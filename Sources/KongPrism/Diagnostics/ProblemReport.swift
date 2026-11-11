@@ -43,6 +43,7 @@ enum ProblemReport {
                                                                 remembered: profile.workingUserAgent, routes: controller.directFirst)
                     write("订阅样本（已脱敏）.yaml", SubscriptionSample.anonymize(String(decoding: raw.data, as: UTF8.self)))
                     write("订阅下载.txt", "下载成功：UA \(raw.agent)，\(raw.data.count) 字节")
+                    controller.markSubscriptionReachable(profile.id, agent: raw.agent)
                 } catch {
                     write("订阅下载.txt", "下载失败：\(error.localizedDescription)\n（已附上本机缓存的节点结构）")
                 }
@@ -68,7 +69,9 @@ enum ProblemReport {
     }
 
     static func tail(_ url: URL, lines count: Int) -> String {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "（没有日志）" }
+        // Includes the previous generation (file.1) when the current file is short.
+        let text = LogTail.read(url, bytes: 256 * 1024)
+        guard !text.isEmpty else { return "（没有日志）" }
         return text.split(separator: "\n", omittingEmptySubsequences: false).suffix(count).joined(separator: "\n")
     }
 

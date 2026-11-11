@@ -12,7 +12,7 @@ import KongPrismCore
 /// For Shortcuts, KongSeek, scripts. Import links (kongprism://install-config?url=…) are handled by Importer.
 enum URLActions {
     static let actions: Set<String> = ["connect", "disconnect", "toggle", "mode", "node", "test", "update", "settings", "report", "onboarding", "rules",
-                                          "recover", "sync", "reload", "menu"]
+                                          "recover", "sync", "reload", "menu", "whatsnew"]
     /// Set by the app delegate, which owns the settings window.
     @MainActor static var openSettings: ((SettingsTab) -> Void)?
     /// Set by the app delegate: the status menu as text (kongprism://menu writes it to menu.txt).
@@ -51,6 +51,7 @@ enum URLActions {
             // ?auto=1 behaves like the scheduled update (few identities, pauses after a refusal).
             let automatic = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "auto" && $0.value == "1" } ?? false
             Task { await controller.updateAllProfiles(automatic: automatic) }
+        case "whatsnew": WhatsNewNotice.show()
         case "recover": Task { await controller.recoverConnections(reason: "链接动作", force: true) }
         case "sync":
             controller.pullFromICloud()

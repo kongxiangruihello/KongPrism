@@ -38,7 +38,19 @@ enum Paths {
     }
 }
 
-/// A small append-only log in logs/app.log (trimmed when it grows past 1 MB).
+/// Keeps one previous generation of a log: past `limit` bytes, file → file.1.
+enum LogRotation {
+    static func previous(_ url: URL) -> URL { URL(fileURLWithPath: url.path + ".1") }
+
+    static func rotate(_ url: URL, limit: Int) {
+        guard let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > limit else { return }
+        let old = previous(url)
+        try? FileManager.default.removeItem(at: old)
+        if (try? FileManager.default.moveItem(at: url, to: old)) == nil { try? FileManager.default.removeItem(at: url) }
+    }
+}
+
+/// A small append-only log in logs/app.log (becomes app.log.1 past 1 MB).
 enum AppLog {
     private static let queue = DispatchQueue(label: "KongPrism.log", qos: .utility)
     private static let formatter: DateFormatter = {
@@ -51,9 +63,7 @@ enum AppLog {
         let line = "\(formatter.string(from: Date())) \(message)\n"
         queue.async {
             let url = Paths.appLog
-            if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 1_000_000 {
-                try? FileManager.default.removeItem(at: url)
-            }
+            LogRotation.rotate(url, limit: 1_000_000)
             if let handle = try? FileHandle(forWritingTo: url) {
                 handle.seekToEndOfFile()
                 handle.write(Data(line.utf8))
@@ -124,6 +134,8 @@ struct AppSettings: Codable, Equatable {
     var avoidFailingNodes = true
     /// 0 = no limit; otherwise automatic groups skip nodes with a higher 流量倍率.
     var maxMultiplier: Double = 0
+    /// 0.8: the GitHub token is in the keychain (githubToken is filled in after loading).
+    var githubTokenInKeychain = false
     /// Bumped when a default changes for everyone (see the migration in init(from:)).
     var settingsVersion = AppSettings.currentVersion
 
@@ -184,6 +196,7 @@ struct AppSettings: Codable, Equatable {
         onboardingDone = v(.onboardingDone, d.onboardingDone)
         avoidFailingNodes = v(.avoidFailingNodes, d.avoidFailingNodes)
         maxMultiplier = v(.maxMultiplier, d.maxMultiplier)
+        githubTokenInKeychain = v(.githubTokenInKeychain, d.githubTokenInKeychain)
         let version = v(.settingsVersion, 1)
         // 0.1.0 resolved unknown domains through the domestic DNS and sent the IP to the
         // proxy, which broke sites with polluted answers; turn that off once for everyone.
@@ -238,6 +251,10 @@ struct Profile: Codable, Equatable, Identifiable {
     var format: String?
     var skipped = 0
     var lastError: String?
+    /// When lastError happened (shown next to it, so an old error is recognisable).
+    var lastErrorAt: Date?
+    /// The link is in the keychain (0.8); `url` is filled in after loading.
+    var urlInKeychain: Bool?
     /// Automatic updates wait until then after the provider refused (manual updates do not).
     var pausedUntil: Date?
 

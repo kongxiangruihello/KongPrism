@@ -58,11 +58,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         controller.verifyCoreAlive()
-        build()
+        let started = Date()
+        build() // at once, from what is already known
+        lastBuildMs = Date().timeIntervalSince(started) * 1000
         guard controller.status.isRunning else { return }
         Task {
+            let fetch = Date()
             await controller.refreshSnapshot()
+            lastRefreshMs = Date().timeIntervalSince(fetch) * 1000
             build() // while the menu is open, with fresh delays
+            // Node tests, failover and the exit lookup cost network round trips (and energy):
+            // at most once a minute however often the menu is opened.
+            guard Date().timeIntervalSince(lastChecks) > 60 else { return }
+            lastChecks = Date()
             await controller.checkSelectedNode()
             await controller.checkFailover()
             await controller.refreshExitInfoIfNeeded()
@@ -70,6 +78,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             build()
         }
     }
+
+    private var lastChecks = Date.distantPast
+    private(set) var lastBuildMs: Double = 0
+    private(set) var lastRefreshMs: Double = 0
 
     // MARK: Building
 
@@ -98,6 +110,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 note.toolTip = "IP 归属来自公开数据库，中转线路或数据库滞后时也会不一致；只作参考"
                 menu.addItem(note)
             }
+        }
+        if let title = WhatsNewNotice.menuTitle {
+            menu.addItem(action(title, #selector(showWhatsNew), key: ""))
         }
         if let notice = CrashRecords.notice {
             let item = action("⚠︎ " + notice + "（点此不再提示）", #selector(dismissCrashNotice), key: "")
@@ -181,11 +196,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             entry.state = merging ? .mixed : (controller.selectedProfile?.id == profile.id ? .on : .off)
             var detail = "\(profile.nodeCount) 个节点"
             if let usage = profile.usage { detail += " · " + usage.summary }
-            if let error = profile.lastError { detail = "更新失败：" + (error.count > 40 ? String(error.prefix(40)) + "…" : error) }
-            entry.toolTip = detail
+            var tooltip = detail
+            if let error = profile.lastError {
+                // Short wording in the menu (it is cut off otherwise); the full reason in the tooltip.
+                let when = profile.lastErrorAt.map { $0.formatted(date: Calendar.current.isDateInToday($0) ? .omitted : .abbreviated, time: .shortened) + " " } ?? ""
+                detail = "\(when)更新失败：\(ErrorSummary.short(error))（仍用上次的 \(profile.nodeCount) 个节点）"
+                tooltip = "\(when)更新失败：\(error)"
+            }
+            entry.toolTip = tooltip
             profileMenu.addItem(entry)
             let info = NSMenuItem(title: "    " + detail, action: nil, keyEquivalent: "")
             info.isEnabled = false
+            info.toolTip = tooltip
             info.attributedTitle = NSAttributedString(string: "    " + detail, attributes: [
                 .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
                 .foregroundColor: profile.lastError == nil && profile.nodeCount > 0 ? NSColor.secondaryLabelColor : NSColor.systemRed])
@@ -319,8 +341,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         controller.verifyCoreAlive()
-        if controller.status.isRunning { await controller.refreshSnapshot() }
+        var refreshMs = 0.0
+        if controller.status.isRunning {
+            let fetch = Date()
+            await controller.refreshSnapshot()
+            refreshMs = Date().timeIntervalSince(fetch) * 1000
+        }
+        let started = Date()
         build()
+        let buildMs = Date().timeIntervalSince(started) * 1000
         func lines(_ menu: NSMenu, depth: Int) -> [String] {
             menu.items.flatMap { item -> [String] in
                 if item.isSeparatorItem { return [String(repeating: "  ", count: depth) + "—"] }
@@ -333,6 +362,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             }
         }
         return lines(menu, depth: 0).joined(separator: "\n")
+            + String(format: "\n#timing build_ms=%.1f refresh_ms=%.1f", buildMs, refreshMs)
     }
 
     // MARK: Helpers
@@ -397,6 +427,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleFavorite(_ sender: NSMenuItem) { if let name = sender.representedObject as? String { controller.toggleFavorite(name) } }
     @objc private func dismissCrashNotice() { CrashRecords.dismissNotice() }
     @objc private func showOnboarding() { Onboarding.show() }
+    @objc private func showWhatsNew() { WhatsNewNotice.show() }
     @objc private func switchToAuto() { controller.select(Groups.auto, in: Groups.select) }
     @objc private func showNodes() { openSettings?(.nodes) }
     @objc private func showConnections() { openConnections?() }

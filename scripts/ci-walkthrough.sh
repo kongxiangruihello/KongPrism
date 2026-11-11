@@ -46,10 +46,13 @@ step "节点和订阅（本机模拟机场）"
 IP="$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || true)"
 [[ -n "$IP" ]] || IP="$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')"
 echo "本机地址 ${IP}（订阅里不能用 127.0.0.1：那是机场拒绝访问时的占位节点）"
+# download.ci.test → 127.0.0.1 on the "provider" side, so a download can go through the node to the local server.
 cat > "$work/ss.json" <<JSON
 {"log":{"level":"warn"},
+ "dns":{"servers":[{"type":"hosts","tag":"hosts","predefined":{"download.ci.test":["127.0.0.1"]}},{"type":"local","tag":"local"}]},
  "inbounds":[{"type":"shadowsocks","listen":"0.0.0.0","listen_port":$SSPORT,"method":"aes-128-gcm","password":"ci-password"}],
- "outbounds":[{"type":"direct"}]}
+ "outbounds":[{"type":"direct"}],
+ "route":{"default_domain_resolver":"local","rules":[{"domain":["download.ci.test"],"action":"resolve","server":"hosts"}]}}
 JSON
 "$CORE" run -c "$work/ss.json" > "$work/ss.log" 2>&1 &
 SS_PID=$!
@@ -94,6 +97,7 @@ payload:
   - 'DOMAIN-SUFFIX,example.net'
 YAML
 cp "$work/www/block.yaml" "$work/www/block2.yaml"
+mkfile -n 200m "$work/www/big.bin"
 python3 scripts/ci-server.py "$SUBPORT" "$work/www" > "$work/http.log" 2>&1 &
 HTTP_PID=$!
 wait_for 10 curl -sf "http://127.0.0.1:$SUBPORT/sub.yaml"
@@ -113,6 +117,7 @@ else
 fi
 RULE_ID="5E7B1C2D-0000-4000-8000-0000000000AA"
 LIMITED_ID="7A1D2C3B-0000-4000-8000-00000000C2C2"
+FLAKY_ID="7A1D2C3B-0000-4000-8000-00000000C4C4"
 REFUSED_ID="7A1D2C3B-0000-4000-8000-00000000C3C3"
 # A stand-in iCloud Drive folder (the runner has no iCloud account): ICloudSync only needs the folder.
 CLOUD="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
@@ -123,14 +128,17 @@ cat > "$SUPPORT/settings.json" <<JSON
 {"mixedPort": $PORT, "apiPort": $API, "apiSecret": "$SECRET", "setSystemProxy": $SYSTEM_PROXY,
  "connectOnLaunch": false, "onboardingDone": true, "autoCheckAppUpdates": false, "autoCheckCoreUpdates": false,
  "autoUpdateRules": false, "hotKeyEnabled": false, "selectedProfileID": "$PROFILE_ID",
- "favoriteNodes": ["CI-Fav"], "maxMultiplier": 1, "iCloudSync": true,
+ "favoriteNodes": ["CI-Fav"], "maxMultiplier": 1, "iCloudSync": true, "proxyDomains": ["ci.test"], "githubToken": "ci-token-123",
  "customRuleSets": [{"id": "$RULE_ID", "name": "CI 拦截", "url": "http://127.0.0.1:$SUBPORT/block.yaml", "target": "reject", "enabled": true}]}
 JSON
 cat > "$SUPPORT/profiles.json" <<JSON
 [{"id": "$PROFILE_ID", "name": "CI", "url": "http://127.0.0.1:$SUBPORT/sub.yaml", "nodeCount": 0, "skipped": 0},
  {"id": "$LIMITED_ID", "name": "CI 限流", "url": "http://127.0.0.1:$SUBPORT/limited.yaml", "nodeCount": 0, "skipped": 0, "updatedAt": "$NOW_ISO"},
- {"id": "$REFUSED_ID", "name": "CI 拒绝", "url": "http://127.0.0.1:$SUBPORT/refused.yaml", "nodeCount": 0, "skipped": 0, "updatedAt": "$NOW_ISO"}]
+ {"id": "$REFUSED_ID", "name": "CI 拒绝", "url": "http://127.0.0.1:$SUBPORT/refused.yaml", "nodeCount": 0, "skipped": 0, "updatedAt": "$NOW_ISO"},
+ {"id": "$FLAKY_ID", "name": "CI 偶发", "url": "http://127.0.0.1:$SUBPORT/flaky.yaml", "nodeCount": 0, "skipped": 0, "updatedAt": "$NOW_ISO"}]
 JSON
+defaults write com.kongxiangrui.KongPrism lastSeenVersion 0.6.0
+defaults write com.kongxiangrui.KongPrism subscriptionRetrySeconds -float 5
 
 step "启动 /Applications/KongPrism.app"
 open "$APP"
@@ -138,6 +146,19 @@ wait_for 20 pgrep -x KongPrism
 APP_PID="$(pgrep -x KongPrism | head -1)"
 sleep 3
 test -f "$SUPPORT/running.marker" && echo "运行标记已创建"
+
+step "订阅链接和 GitHub 令牌移进钥匙串"
+keychain() { perl -e 'alarm 15; exec @ARGV' security find-generic-password -s com.kongxiangrui.KongPrism -a "$1" -w; }
+python3 - "$SUPPORT/profiles.json" "$SUPPORT/settings.json" <<'PY'
+import json, sys
+profiles = json.load(open(sys.argv[1])); settings = json.load(open(sys.argv[2]))
+assert all("url" not in p and p.get("urlInKeychain") for p in profiles), profiles
+assert settings.get("githubToken", "") == "" and settings.get("githubTokenInKeychain"), settings.get("githubToken")
+print("✅ profiles.json / settings.json 里已没有订阅链接和令牌")
+PY
+test "$(keychain "subscription:$PROFILE_ID")" = "http://127.0.0.1:$SUBPORT/sub.yaml"
+test "$(keychain github-token)" = "ci-token-123"
+echo "✅ 钥匙串里有链接和令牌；另一个程序（security）读取时没有弹出密码框——说明更新后的新版本也能直接读取"
 
 step "更新订阅"
 link update
@@ -156,6 +177,15 @@ step "更新规则集（含自定义远程规则集）"
 link rules
 wait_for 90 test -f "$SUPPORT/rules/custom-5e7b1c2d.json"
 python3 -c "import json,sys; print('自定义规则集：', json.load(open(sys.argv[1])))" "$SUPPORT/rules/custom-5e7b1c2d.json"
+
+step "内核日志轮换"
+python3 - "$SUPPORT/logs/core.log" <<'PY'
+import sys
+line = "+0800 2026-01-01 00:00:00 ERROR [1 5.0s] connection: open connection to rotation.example:443 using outbound/trojan[轮换前的节点]: dial tcp 203.0.113.1:443: i/o timeout\n"
+with open(sys.argv[1], "w") as f:
+    f.write(line * (6_000_000 // len(line.encode()) + 1))
+PY
+ls -la "$SUPPORT/logs"
 
 step "开启代理"
 link connect
@@ -176,6 +206,9 @@ assert "CI-Expensive 倍率:3" in groups["节点选择"], groups["节点选择"]
 assert not any(t.startswith("有效期") for t in tags), "信息条目不应进配置"
 print("✅ 倍率上限 1：自动选择不含 CI-Expensive（3 倍），手选列表里仍有")
 PY
+test -f "$SUPPORT/logs/core.log.1" && grep -q "轮换前的节点" "$SUPPORT/logs/core.log.1"
+test "$(stat -f %z "$SUPPORT/logs/core.log")" -lt 1000000
+echo "✅ 超过 5 MB 的内核日志变成 core.log.1 保留，新日志从头写"
 if [[ "$SYSTEM_PROXY" == true ]]; then
   scutil --proxy | tee "$work/proxy.txt"
   grep -q "HTTPProxy : 127.0.0.1" "$work/proxy.txt"
@@ -222,6 +255,12 @@ link "update?auto=1"
 sleep 6
 test "$(hits /limited.yaml)" = "$l1" && test "$(hits /refused.yaml)" = "$r1" || { echo "❌ 暂停期间又请求了"; exit 1; }
 echo "✅ 429 只请求 1 次并按 Retry-After 暂停（最短 10 分钟）；403 暂停 3 小时并记下“访问受限”；暂停期间不再请求"
+
+step "网络一时出错：稍后自动重试（模拟 503）"
+retried() { python3 -c "import json,sys; p={x['id']:x for x in json.load(open(sys.argv[1]))}[sys.argv[2]]; sys.exit(0 if p['nodeCount'] == 5 and not p.get('lastError') else 1)" "$SUPPORT/profiles.json" "$FLAKY_ID"; }
+wait_for 40 retried
+grep -q "订阅“CI 偶发”暂时连不上，5 秒后重试" "$SUPPORT/logs/app.log"
+echo "✅ 503 后没有暂停，5 秒（正式版为 10 分钟）后重试成功，旧错误已清除；请求 $(hits /flaky.yaml) 次"
 
 step "断开旧连接（唤醒 / 切网后的恢复）"
 # -p: a CONNECT tunnel, like browsers use for HTTPS (a plain-HTTP proxy request is kept alive by the inbound).
@@ -292,6 +331,29 @@ echo "KongPrism ${app_mb} MB，sing-box ${core_mb} MB"
 test "$app_mb" -lt 250 || { echo "❌ KongPrism 占用内存过多"; exit 1; }
 test "$core_mb" -lt 150 || { echo "❌ sing-box 占用内存过多"; exit 1; }
 
+step "有流量时的耗电：经节点下载 200 MB"
+cpu() { ps -o cputime= -p "$1" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))'; }
+CORE_PID="$(pgrep -f "$SUPPORT/runtime/config.json" | head -1)"
+a0="$(cpu "$APP_PID")"; c0="$(cpu "$CORE_PID")"; s0="$(cpu "$SS_PID")"; t0="$(python3 -c 'import time; print(time.time())')"
+result="$(curl -sS -m 120 -x "http://127.0.0.1:$PORT" -o /dev/null -w '%{http_code} %{size_download}' "http://download.ci.test:$SUBPORT/big.bin")"
+t1="$(python3 -c 'import time; print(time.time())')"
+a1="$(cpu "$APP_PID")"; c1="$(cpu "$CORE_PID")"; s1="$(cpu "$SS_PID")"
+python3 - "$result" "$t0" "$t1" "$a0" "$a1" "$c0" "$c1" "$s0" "$s1" "$(rss_mb "$APP_PID")" "$(rss_mb "$CORE_PID")" <<'PY'
+import sys
+code, size = sys.argv[1].split()
+t0, t1, a0, a1, c0, c1, s0, s1 = map(float, sys.argv[2:10])
+app_mb, core_mb = sys.argv[10:12]
+mb = int(size) / 1024 / 1024
+print(f"下载 {mb:.0f} MB，HTTP {code}，用时 {t1 - t0:.1f} 秒（{mb / (t1 - t0):.0f} MB/s）")
+print(f"CPU 时间：KongPrism {a1 - a0:.2f} 秒，sing-box（KongPrism 内核）{c1 - c0:.2f} 秒，节点端 {s1 - s0:.2f} 秒；内存 App {app_mb} MB，内核 {core_mb} MB")
+assert code == "200" and int(size) == 200 * 1024 * 1024, "下载不完整"
+assert s1 - s0 > 0.05, "流量没有经过节点"
+assert a1 - a0 < 1.0, "下载时 KongPrism 本身不应占用 CPU（流量只经过内核）"
+assert c1 - c0 < 20, "内核转发 200 MB 用的 CPU 过多"
+assert int(core_mb) < 200, "下载时内核内存过多"
+print("✅ 下载走节点；App 几乎不占 CPU；内核 CPU 与内存在上限内")
+PY
+
 step "设置窗口各页截图"
 for tab in profiles nodes rules network stats general updates; do
   link "settings/$tab"
@@ -299,6 +361,8 @@ for tab in profiles nodes rules network stats general updates; do
 done
 link onboarding
 shot onboarding
+link whatsnew
+shot whatsnew
 
 step "问题报告"
 # Use a node whose name says Japan: the exit (GitHub's Mac runners are in the US) should be flagged.
@@ -386,6 +450,13 @@ fav = next(i for i, l in enumerate(nodes) if l.startswith("★ CI-SS"))
 other = next(i for i, l in enumerate(nodes) if l.startswith("CI-Fav"))
 assert fav < other, "收藏的节点排在前面"
 print("✅ 菜单：第一层精简，工具在子菜单，收藏排在最前")
+assert any(l.startswith("✨ ") for l in top), "更新后的新功能提示"
+assert any("被机场限流" in l for l in lines), "订阅错误用简短说法"
+timing = dict(part.split("=") for part in next(l for l in lines if l.startswith("#timing")).split()[1:])
+print(f"菜单构建 {float(timing['build_ms']):.1f} ms，向内核取数据 {float(timing['refresh_ms']):.1f} ms")
+assert float(timing["build_ms"]) < 100, "菜单构建太慢"
+assert float(timing["refresh_ms"]) < 500, "向内核取数据太慢"
+print("✅ 有新功能提示；订阅错误简短；菜单打开快")
 PY
 
 step "关闭代理，系统代理复原"
@@ -416,6 +487,10 @@ wait_for 20 pgrep -x KongPrism
 sleep 3
 link connect
 wait_for 40 api /version
+u0="$(grep -c "订阅 127.0.0.1：Clash，5 个节点" "$SUPPORT/logs/app.log")"
+link update
+wait_for 30 bash -c "test \$(grep -c '订阅 127.0.0.1：Clash，5 个节点' '$SUPPORT/logs/app.log') -gt $u0"
+echo "✅ 重新打开后从钥匙串读出链接，订阅更新成功"
 for tab in profiles nodes rules network general updates; do
   link "settings/$tab"
   shot "dark-settings-$tab"
@@ -446,6 +521,11 @@ sleep 1
 rm -rf "$SUPPORT/updates/previous" "$SUPPORT/running.marker"
 defaults delete com.kongxiangrui.KongPrism lastGoodVersion || true
 defaults delete com.kongxiangrui.KongPrism abnormalLaunches || true
+for account in "subscription:$PROFILE_ID" "subscription:$LIMITED_ID" "subscription:$REFUSED_ID" "subscription:$FLAKY_ID" github-token; do
+  security delete-generic-password -s com.kongxiangrui.KongPrism -a "$account" >/dev/null 2>&1 || true
+done
+defaults delete com.kongxiangrui.KongPrism lastSeenVersion >/dev/null 2>&1 || true
+defaults delete com.kongxiangrui.KongPrism subscriptionRetrySeconds >/dev/null 2>&1 || true
 
 step "全部通过"
 ls -la "$SHOTS"

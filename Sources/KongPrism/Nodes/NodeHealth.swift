@@ -4,7 +4,16 @@ import KongPrismCore
 
 enum LogTail {
     /// The last `bytes` of a log file (the core log can reach 5 MB).
+    /// Reads on into the previous generation (file.1) when the current file is shorter than `bytes`.
     static func read(_ url: URL, bytes: Int = 512 * 1024) -> String {
+        let current = readTail(url, bytes: bytes)
+        let missing = bytes - current.utf8.count
+        guard missing > 4096 else { return current }
+        let older = readTail(LogRotation.previous(url), bytes: missing)
+        return older.isEmpty ? current : older + "\n" + current
+    }
+
+    private static func readTail(_ url: URL, bytes: Int) -> String {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0

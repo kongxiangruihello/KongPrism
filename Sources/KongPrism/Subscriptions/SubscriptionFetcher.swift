@@ -94,6 +94,8 @@ enum SubscriptionFetcher {
                 AppLog.write("订阅 \(address.host ?? "")：UA \(agent) → HTTP \(error.status)\(error.detail.map { "（\($0)）" } ?? "")")
                 if let detail = error.detail { serverSays = detail }
                 if error.status == 404 { break }
+                // A server error says nothing about the client identity: stop and let the caller retry later.
+                if (500...599).contains(error.status) { throw error }
             } catch let error as URLError {
                 // A network failure will not change with another User-Agent.
                 throw error

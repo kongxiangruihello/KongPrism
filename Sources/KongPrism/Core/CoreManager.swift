@@ -180,11 +180,10 @@ final class CoreManager: @unchecked Sendable {
         AppLog.write("已结束残留的 sing-box（PID \(pid)）")
     }
 
+    /// Past 5 MB the log becomes core.log.1 (the previous .1 goes), so statistics and diagnostics
+    /// still see the hours before (0.8; before, the whole log was deleted). Runs while the core is stopped.
     private func trimLog() {
-        let url = Paths.coreLog
-        if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 5_000_000 {
-            try? FileManager.default.removeItem(at: url)
-        }
+        LogRotation.rotate(Paths.coreLog, limit: 5_000_000)
     }
 
     static func ensureFile(_ url: URL) -> URL {
