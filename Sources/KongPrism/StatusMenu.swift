@@ -59,6 +59,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         headerItem.isEnabled = false
         if case .failed = status { headerItem.attributedTitle = wrapped(header) }
         menu.addItem(headerItem)
+        if status.isRunning, controller.settings.setSystemProxy, !SystemProxy.isPointing(to: controller.settings.mixedPort) {
+            let item = action("⚠︎ 系统代理被其他软件改掉了，点此重新设置", #selector(reapplyProxy), key: "")
+            item.attributedTitle = NSAttributedString(string: item.title, attributes: [.foregroundColor: NSColor.systemOrange, .font: NSFont.menuFont(ofSize: 0)])
+            menu.addItem(item)
+        }
         if let warning = controller.usageWarning {
             let item = NSMenuItem(title: "⚠︎ " + warning, action: #selector(manageProfiles), keyEquivalent: "")
             item.target = self
@@ -148,6 +153,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(action("复制终端代理命令", #selector(copyExports), key: "c"))
+        menu.addItem(action("诊断连接…", #selector(diagnose), key: "d"))
         if controller.appRelease != nil || controller.latestCore != nil {
             let update = action("有可用更新…", #selector(showUpdates), key: "")
             update.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
@@ -242,6 +248,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func ignoreClipboard() { Importer.markClipboardHandled() }
     @objc private func manageProfiles() { openSettings?(.profiles) }
     @objc private func copyExports() { controller.copyShellExports() }
+    @objc private func diagnose() { Diagnostics.show(controller: controller) }
+    @objc private func reapplyProxy() { controller.reapplySystemProxy() }
     @objc private func showSettings() { openSettings?(.general) }
     @objc private func showUpdates() { openSettings?(.updates) }
     @objc private func quit() { NSApp.terminate(nil) }

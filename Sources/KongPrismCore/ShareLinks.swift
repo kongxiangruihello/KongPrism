@@ -114,6 +114,9 @@ public enum ShareLinks {
     static func vlessStyle(_ link: String, type: String) throws -> ProxyNode {
         let url = try LinkURL(link)
         guard let uuid = url.userinfo?.removingPercentEncoding, !uuid.isEmpty else { throw Failure.malformed(link) }
+        if type == "vless", let encryption = url.query["encryption"], !encryption.isEmpty, encryption != "none" {
+            throw Failure.unsupportedTransport("VLESS encryption")
+        }
         var outbound = base(type, url)
         outbound["uuid"] = .string(uuid)
         if type == "vless", let flow = url.query["flow"], !flow.isEmpty { outbound["flow"] = .string(flow) }

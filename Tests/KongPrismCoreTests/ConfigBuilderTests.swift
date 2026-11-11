@@ -29,6 +29,18 @@ final class ConfigBuilderTests: XCTestCase {
         XCTAssertEqual(built.json["inbounds"]?.arrayValue?.first?["listen"], "127.0.0.1")
     }
 
+    func testResolveIsOptInAndUsesRemoteDNS() throws {
+        // sing-box sends the resolved IP (not the domain) to the proxy after `resolve`, so it must not be on by default.
+        let plain = ConfigBuilder.build(nodes: try nodes(), options: CoreOptions())
+        let actions = plain.json["route"]?["rules"]?.arrayValue?.compactMap { $0["action"]?.stringValue } ?? []
+        XCTAssertFalse(actions.contains("resolve"))
+        var options = CoreOptions()
+        options.smartIPRouting = true
+        let smart = ConfigBuilder.build(nodes: try nodes(), options: options)
+        let resolve = smart.json["route"]?["rules"]?.arrayValue?.first { $0["action"] == "resolve" }
+        XCTAssertEqual(resolve?["server"], "dns-remote")
+    }
+
     func testEmptyProfileStillBuilds() {
         let built = ConfigBuilder.build(nodes: [], options: CoreOptions())
         let tags = built.json["outbounds"]?.arrayValue?.compactMap { $0["tag"]?.stringValue }

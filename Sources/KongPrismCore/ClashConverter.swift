@@ -54,6 +54,7 @@ public enum ClashConverter {
             if let encoding = proxy.string("packet-encoding") { outbound["packet_encoding"] = .string(encoding) }
 
         case "vless":
+            if let encryption = proxy.string("encryption"), encryption != "none" { throw Failure.unsupported("VLESS encryption") }
             outbound["type"] = "vless"
             outbound["uuid"] = .string(try proxy.require("uuid"))
             if let flow = proxy.string("flow") { outbound["flow"] = .string(flow) }
@@ -155,7 +156,8 @@ public enum ClashConverter {
         switch network {
         case "ws":
             let options = proxy.object("ws-opts")
-            let headers = options.object("headers")
+            // "ws-path" / "ws-headers" are the old Clash spellings some providers still send.
+            let headers = options.object("headers").isEmpty ? proxy.object("ws-headers") : options.object("headers")
             var path = options.string("path") ?? proxy.string("ws-path") ?? "/"
             var transport: [String: JSONValue] = ["type": "ws"]
             if let range = path.range(of: "?ed=") {

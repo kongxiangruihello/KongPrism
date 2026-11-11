@@ -165,6 +165,16 @@ final class AppController: ObservableObject {
     }
 
     /// Rebuilds the config and restarts sing-box (after a subscription or setting change).
+    /// Points the system proxy at KongPrism again (another client may have changed it).
+    func reapplySystemProxy() {
+        guard status.isRunning else { return }
+        let port = settings.mixedPort
+        Task {
+            let result: Result<Void, Error> = await Shell.background { Result { try SystemProxy.enable(port: port) } }
+            if case .failure(let error) = result { fail("设置系统代理失败：\(error.localizedDescription)") }
+        }
+    }
+
     func reloadIfRunning() {
         guard status.isRunning else { return }
         status = .stopped

@@ -74,7 +74,7 @@ struct AppSettings: Codable, Equatable {
     var allowLAN = false
     var mode = "Rule"
     var blockAds = true
-    var smartIPRouting = true
+    var smartIPRouting = false
     var regionGroups = true
     var remoteDNS = "https://1.1.1.1/dns-query"
     var localDNS = "https://223.5.5.5/dns-query"
@@ -94,6 +94,10 @@ struct AppSettings: Codable, Equatable {
     var directDomains: [String] = []
     var proxyDomains: [String] = []
     var rulesUpdatedAt: Date?
+    /// Bumped when a default changes for everyone (see the migration in init(from:)).
+    var settingsVersion = AppSettings.currentVersion
+
+    static let currentVersion = 2
 
     init() {}
 
@@ -128,6 +132,11 @@ struct AppSettings: Codable, Equatable {
         directDomains = v(.directDomains, d.directDomains)
         proxyDomains = v(.proxyDomains, d.proxyDomains)
         rulesUpdatedAt = try? c.decodeIfPresent(Date.self, forKey: .rulesUpdatedAt)
+        let version = v(.settingsVersion, 1)
+        // 0.1.0 resolved unknown domains through the domestic DNS and sent the IP to the
+        // proxy, which broke sites with polluted answers; turn that off once for everyone.
+        if version < 2 { smartIPRouting = false }
+        settingsVersion = AppSettings.currentVersion
     }
 
     var coreOptions: CoreOptions {

@@ -79,6 +79,8 @@ final class ShareLinksTests: XCTestCase {
     func testUnsupportedTransportThrows() {
         XCTAssertThrowsError(try ShareLinks.parse("vless://u@h.com:443?security=tls&type=xhttp#x"))
         XCTAssertThrowsError(try ShareLinks.parse("ssr://abc"))
+        XCTAssertThrowsError(try ShareLinks.parse("vless://u@h.com:443?encryption=mlkem768x25519plus.native.0rtt.abc&security=tls#x"))
+        XCTAssertNoThrow(try ShareLinks.parse("vless://u@h.com:443?encryption=none&security=tls#x"))
     }
 
     func testTrojan() throws {

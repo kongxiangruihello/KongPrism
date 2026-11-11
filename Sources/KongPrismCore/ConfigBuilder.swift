@@ -38,7 +38,9 @@ public struct CoreOptions: Equatable, Sendable {
     public var mode = "Rule" // Rule / Global / Direct
     public var blockAds = true
     /// Resolve domains no list knows about and send Chinese IPs direct (like Clash GEOIP,CN).
-    public var smartIPRouting = true
+    /// Off by default: after `resolve`, sing-box hands the proxy server the IP instead of the
+    /// domain, so the lookup goes through the remote (proxied) DNS to avoid polluted answers.
+    public var smartIPRouting = false
     public var remoteDNS = "https://1.1.1.1/dns-query"
     public var localDNS = "https://223.5.5.5/dns-query"
     public var testURL = "https://www.gstatic.com/generate_204"
@@ -148,7 +150,7 @@ public enum ConfigBuilder {
             ["rule_set": [.string(RuleSet.geositeNotCN.tag)], "outbound": .string(Groups.select)],
         ]
         if options.smartIPRouting {
-            rules.append(["action": "resolve", "strategy": "prefer_ipv4"])
+            rules.append(["action": "resolve", "server": "dns-remote", "strategy": "prefer_ipv4"])
         }
         rules.append(["rule_set": [.string(RuleSet.geoipCN.tag)], "outbound": .string(Groups.direct)])
 

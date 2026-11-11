@@ -342,8 +342,10 @@ struct RulesView: View {
             Section("规则") {
                 Toggle("拦截广告域名（geosite-category-ads-all）", isOn: $controller.settings.blockAds)
                 Toggle("未知域名按 IP 归属分流（国内 IP 直连）", isOn: $controller.settings.smartIPRouting)
+                Text("开启后，列表外的域名会先经代理 DNS 解析，国内 IP 直连、其余把 IP 交给节点。一般不必开启。")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("按地区自动分组（香港、日本、美国…）", isOn: $controller.settings.regionGroups)
-                Text("顺序：局域网直连 → 自定义规则 → 国内域名直连 → 国外域名走代理 → 国内 IP 直连 → 其余走代理。")
+                Text("顺序：局域网直连 → 自定义规则 → 国内域名直连 → 国外域名走代理 →（可选）国内 IP 直连 → 其余走代理。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("自定义（每行一个域名后缀，如 example.com）") {
@@ -470,6 +472,7 @@ struct AboutView: View {
                     Button("打开日志文件夹") { NSWorkspace.shared.open(Paths.logs) }
                     Button("打开数据文件夹") { NSWorkspace.shared.open(Paths.support) }
                     Button("复制终端代理命令") { controller.copyShellExports() }
+                    Button("诊断连接…") { Diagnostics.show(controller: controller) }
                 }
                 Text(ShellExports.command(port: controller.settings.mixedPort)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }
