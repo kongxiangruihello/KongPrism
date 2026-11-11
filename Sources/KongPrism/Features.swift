@@ -7,14 +7,20 @@ import KongPrismCore
 /// Looks up where traffic leaves the proxy. Asked only when the menu opens, at most every
 /// five minutes or after a node / mode change, so it costs nothing in the background.
 enum ExitLookup {
-    static let services = ["https://api.ip.sb/geoip", "https://ipinfo.io/json"]
+    /// ipinfo.io first: api.ip.sb sits behind Cloudflare and often answers proxy IPs with 403.
+    static let services = ["https://ipinfo.io/json", "https://ipapi.co/json/", "https://api.ip.sb/geoip"]
+    private static let preferredKey = "exitLookupService"
 
+    /// Tries the service that worked last time first, and remembers which one answered.
     static func fetch(port: Int) async -> ExitInfo? {
-        for service in services {
+        let preferred = UserDefaults.standard.string(forKey: preferredKey)
+        let ordered = (preferred.map { [$0] } ?? []) + services.filter { $0 != preferred }
+        for service in ordered {
             guard let url = URL(string: service),
                   let (data, _) = try? await Net.get(url, headers: ["User-Agent": "curl/8.7.1", "Accept": "application/json"],
                                                      routes: [.viaProxy(port: port)], timeout: 6),
                   let json = JSONValue.parse(data), let info = ExitInfo(json: json) else { continue }
+            if service != preferred { UserDefaults.standard.set(service, forKey: preferredKey) }
             return info
         }
         return nil
@@ -178,6 +184,17 @@ enum ICloudSync {
         var directDomains: [String]
         var proxyDomains: [String]
         var rulesChangedAt: Date?
+        /// 0.6: these follow rulesChangedAt too (absent in files written by older versions).
+        struct RuleSetEntry: Codable {
+            var id: UUID
+            var name: String
+            var url: String
+            var target: String
+            var enabled: Bool
+        }
+        var favoriteNodes: [String]? = nil
+        var serviceTargets: [String: String]? = nil
+        var customRuleSets: [RuleSetEntry]? = nil
     }
 
     static var folder: URL {

@@ -7,6 +7,8 @@ import KongPrismCore
 struct NodesView: View {
     @EnvironmentObject var controller: AppController
     @State private var sortByDelay = true
+    @State private var failures: [String: Int] = [:]
+    @State private var failuresSince: String?
 
     private var nodes: [String] {
         let all = controller.snapshot.groups[Groups.select]?.all ?? []
@@ -35,6 +37,7 @@ struct NodesView: View {
                 Spacer()
                 Toggle("菜单里隐藏不可用节点", isOn: $controller.settings.hideDeadNodes)
             }
+            NodeQualityBar(failures: $failures, since: $failuresSince)
             let current = controller.snapshot.groups[Groups.select]?.now
             List(nodes, id: \.self) { name in
                 HStack {
@@ -51,7 +54,22 @@ struct NodesView: View {
                         Text("备用").font(.caption2).padding(.horizontal, 4).background(Color.orange.opacity(0.2)).cornerRadius(3)
                     }
                     Text(controller.nodeProtocols[name] ?? "").font(.caption).foregroundStyle(.secondary)
+                    if let rate = NodeFilter.multiplier(name) {
+                        let limit = controller.settings.maxMultiplier
+                        Text(String(format: rate < 1 ? "%.2g×" : "%.3g×", rate)).font(.caption2.monospacedDigit())
+                            .padding(.horizontal, 4)
+                            .background((limit > 0 && rate > limit ? Color.gray : rate < 1 ? Color.green : rate > 1 ? Color.orange : Color.blue).opacity(0.18))
+                            .cornerRadius(3)
+                            .help(limit > 0 && rate > limit ? "倍率高于设置，自动选择不会用它" : "流量倍率")
+                    }
+                    if controller.avoidedNodes[name].map({ $0 > Date() }) == true {
+                        Text("暂避").font(.caption2).padding(.horizontal, 4).background(Color.orange.opacity(0.2)).cornerRadius(3)
+                    }
                     Spacer()
+                    if let count = failures[name], count > 0 {
+                        Text("24h 失败 \(count)").font(.caption.monospacedDigit())
+                            .foregroundStyle(count >= 20 ? Color.red : count >= 5 ? Color.orange : Color.secondary)
+                    }
                     delayText(controller.snapshot.delays[name])
                 }
                 .contentShape(Rectangle())

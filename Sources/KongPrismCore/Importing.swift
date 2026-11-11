@@ -81,6 +81,10 @@ extension SubscriptionUsage {
             if days < 0 { return "订阅已过期" }
             if days < 7 { return "订阅 \(max(1, Int(days.rounded(.up)))) 天后到期" }
         }
+        if total == 0, let remaining {
+            if remaining <= 0 { return "流量已用完" }
+            if remaining < 2 * 1024 * 1024 * 1024 { return "流量只剩 \(Self.bytes(remaining))" }
+        }
         if total > 0 {
             let ratio = Double(used) / Double(total)
             if ratio >= 1 { return "流量已用完" }

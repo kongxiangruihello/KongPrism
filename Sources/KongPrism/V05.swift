@@ -168,6 +168,7 @@ extension AppController {
         } else {
             settings.favoriteNodes.append(name)
         }
+        rulesChanged() // iCloud sync carries favorites (0.6)
     }
 }
 

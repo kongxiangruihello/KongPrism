@@ -62,6 +62,14 @@ final class AppController: ObservableObject {
     @Published private(set) var stats = TrafficStats.load()
     @Published private(set) var stagedUpdate: (version: String, app: URL)?
 
+    /// 0.6: nodes left out of the automatic groups until the date (自动避开连不上的节点).
+    @Published private(set) var avoidedNodes: [String: Date] = [:]
+    private var lastRecovery = Date.distantPast
+    func setAvoidedNodes(_ nodes: [String: Date]) { avoidedNodes = nodes }
+    var lastRecoveryDate: Date { lastRecovery }
+    func markRecovery() { lastRecovery = Date() }
+    func showNodeNotice(_ text: String) { nodeNotice = text }
+
     private var exitFetchedAt: Date?
     private var exitKey = ""
     private var nodeFailures: [String: Int] = [:]
@@ -108,6 +116,15 @@ final class AppController: ObservableObject {
 
     func launch() {
         RuleUpdater.installBundledIfMissing()
+        // 0.6: providers without the usage header — read expiry / remaining traffic from the stored information entries.
+        var filled = false
+        for index in profiles.indices where profiles[index].usage == nil {
+            if let usage = SubscriptionUsage.fromInformational(Store.loadNodes(profiles[index].id).map(\.name)) {
+                profiles[index].usage = usage
+                filled = true
+            }
+        }
+        if filled { saveProfiles() }
         CoreManager.killStale()
         core.tunMode = settings.tunMode
         // An enhanced-mode core left running by a crash keeps routing everything; stop it unless we reconnect now.
@@ -125,7 +142,7 @@ final class AppController: ObservableObject {
         Task {
             try? await Task.sleep(nanoseconds: 15_000_000_000)
             for profile in profiles where profile.isRemote && Date().timeIntervalSince(profile.updatedAt ?? .distantPast) > interval {
-                try? await updateProfile(profile.id)
+                try? await updateProfile(profile.id, automatic: true)
             }
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -188,6 +205,7 @@ final class AppController: ObservableObject {
         pullFromICloud()
         Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
+            await recoverConnections(reason: "唤醒")
             await checkSelectedNode()
         }
     }
@@ -217,7 +235,8 @@ final class AppController: ObservableObject {
         restartAttempts = 0
         let nodes = activeNodes()
         let backup = backupNodes()
-        let options = settings.coreOptions
+        var options = settings.coreOptions
+        options.avoidNodes = Set(avoidedNodes.filter { $0.value > Date() }.keys)
         let tun = settings.tunMode
         // In enhanced mode the TUN interface carries the traffic; the system proxy stays untouched.
         let setProxy = settings.setSystemProxy && !tun
@@ -455,6 +474,10 @@ final class AppController: ObservableObject {
         AppLog.write("网络变化：\(fingerprint.map { "\($0.label)（\($0.routerMAC)）" } ?? "无网络")")
         exitFetchedAt = nil
         Task {
+            if fingerprint != nil {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await recoverConnections(reason: "网络切换")
+            }
             await checkSelectedNode()
             await checkFailover()
         }
@@ -589,6 +612,7 @@ final class AppController: ObservableObject {
 
     func setServiceTarget(_ service: Service, _ target: String) {
         if target == Service.follow { settings.serviceTargets[service.rawValue] = nil } else { settings.serviceTargets[service.rawValue] = target }
+        rulesChanged()
         reloadIfRunning()
     }
 
@@ -652,9 +676,14 @@ final class AppController: ObservableObject {
                                          workingUserAgent: profile.workingUserAgent,
                                          nodes: profile.isRemote ? nil : Store.loadNodes(profile.id))
             }
-            let payload = ICloudSync.Payload(updatedAt: Date(), device: ICloudSync.deviceName, profiles: entries,
+            var payload = ICloudSync.Payload(updatedAt: Date(), device: ICloudSync.deviceName, profiles: entries,
                                              directDomains: settings.directDomains, proxyDomains: settings.proxyDomains,
                                              rulesChangedAt: settings.rulesChangedAt)
+            payload.favoriteNodes = settings.favoriteNodes
+            payload.serviceTargets = settings.serviceTargets
+            payload.customRuleSets = settings.customRuleSets.map {
+                ICloudSync.Payload.RuleSetEntry(id: $0.id, name: $0.name, url: $0.url, target: $0.target, enabled: $0.enabled)
+            }
             do {
                 try ICloudSync.write(payload)
                 settings.lastSyncRead = Date()
@@ -688,8 +717,34 @@ final class AppController: ObservableObject {
         if let remoteRules = payload.rulesChangedAt, remoteRules > (settings.rulesChangedAt ?? .distantPast) {
             settings.directDomains = payload.directDomains
             settings.proxyDomains = payload.proxyDomains
+            if let favorites = payload.favoriteNodes { settings.favoriteNodes = favorites }
+            if let targets = payload.serviceTargets { settings.serviceTargets = targets }
+            var needsDownload = false
+            if let remoteSets = payload.customRuleSets {
+                // Same ids keep their downloaded files; new ones are downloaded; missing ones go.
+                let local = Dictionary(uniqueKeysWithValues: settings.customRuleSets.map { ($0.id, $0) })
+                let merged: [CustomRuleSetSetting] = remoteSets.map { entry in
+                    var item = local[entry.id] ?? CustomRuleSetSetting(name: entry.name, url: entry.url, target: entry.target)
+                    item.id = entry.id
+                    if item.url != entry.url { item.fileExtension = nil; item.ruleCount = nil }
+                    item.name = entry.name
+                    item.url = entry.url
+                    item.target = entry.target
+                    item.enabled = entry.enabled
+                    if item.fileExtension == nil { needsDownload = true }
+                    return item
+                }
+                for gone in settings.customRuleSets where !remoteSets.contains(where: { $0.id == gone.id }) {
+                    CustomRuleSets.removeFiles(of: gone)
+                }
+                settings.customRuleSets = merged
+            }
             settings.rulesChangedAt = remoteRules
-            reloadIfRunning()
+            if needsDownload {
+                Task { _ = await refreshCustomRuleSets(); reloadIfRunning() }
+            } else {
+                reloadIfRunning()
+            }
         }
         guard !added.isEmpty else { return }
         Store.save(profiles, to: Paths.profiles)
@@ -841,26 +896,30 @@ final class AppController: ObservableObject {
         }
     }
 
-    func updateProfile(_ id: UUID, nameIfDefault: Bool = false) async throws {
+    func updateProfile(_ id: UUID, nameIfDefault: Bool = false, automatic: Bool = false) async throws {
         guard let profile = profiles.first(where: { $0.id == id }), let url = profile.url else { return }
+        if automatic, let until = profile.pausedUntil, until > Date() { return }
         subscriptionTask = .working("正在更新 \(profile.name)…", nil)
         do {
             let fetched = try await SubscriptionFetcher.fetch(url: url, userAgent: profile.userAgent, remembered: profile.workingUserAgent,
-                                                              routes: directFirst)
+                                                              routes: directFirst, automatic: automatic)
+            // Providers without the subscription-userinfo header often put it in an information entry.
+            let usage = fetched.usage ?? SubscriptionUsage.fromInformational(fetched.result.nodes.map(\.name))
             let changed = Store.loadNodes(id) != fetched.result.nodes
             Store.saveNodes(fetched.result.nodes, for: id)
             if let index = profiles.firstIndex(where: { $0.id == id }) {
                 profiles[index].nodeCount = fetched.result.nodes.count
                 profiles[index].format = fetched.result.format.rawValue
                 profiles[index].skipped = fetched.result.skipped
-                profiles[index].usage = fetched.usage ?? profiles[index].usage
+                profiles[index].usage = usage ?? profiles[index].usage
+                profiles[index].pausedUntil = nil
                 profiles[index].updatedAt = Date()
                 profiles[index].lastError = nil
                 profiles[index].workingUserAgent = fetched.agent
                 if nameIfDefault, let name = fetched.suggestedName, !name.isEmpty { profiles[index].name = name }
             }
             saveProfiles()
-            if settings.usageNotifications, let warning = fetched.usage?.warning() {
+            if settings.usageNotifications, let warning = usage?.warning() {
                 Notifier.notifyOnce(key: "\(id.uuidString)-\(warning)", title: "KongPrism：\(profile.name)", body: warning, settings: &settings)
             }
             var message = "\(profile.name)：\(fetched.result.nodes.count) 个节点"
@@ -871,6 +930,12 @@ final class AppController: ObservableObject {
         } catch {
             if let index = profiles.firstIndex(where: { $0.id == id }) {
                 profiles[index].lastError = error.localizedDescription
+                if automatic, let refused = error as? SubscriptionFetcher.Refused {
+                    // Wait as long as the server asked (Retry-After), otherwise three hours.
+                    let wait = min(24 * 3600, max(600, refused.retryAfter ?? 3 * 3600))
+                    profiles[index].pausedUntil = Date().addingTimeInterval(wait)
+                    AppLog.write("订阅“\(profile.name)”被拒绝，自动更新暂停 \(Int(wait / 60)) 分钟")
+                }
                 saveProfiles()
             }
             var message = "\(profile.name) 更新失败：\(error.localizedDescription)"
@@ -882,8 +947,8 @@ final class AppController: ObservableObject {
         }
     }
 
-    func updateAllProfiles() async {
-        for profile in profiles where profile.isRemote { try? await updateProfile(profile.id) }
+    func updateAllProfiles(automatic: Bool = false) async {
+        for profile in profiles where profile.isRemote { try? await updateProfile(profile.id, automatic: automatic) }
     }
 
     // MARK: Updates

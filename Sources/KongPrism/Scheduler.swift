@@ -14,7 +14,7 @@ final class Scheduler {
         guard let controller else { return }
         let hours = max(1, controller.settings.subscriptionIntervalHours)
         schedule("subscriptions", every: TimeInterval(hours) * 3600) { controller in
-            await controller.updateAllProfiles()
+            await controller.updateAllProfiles(automatic: true)
         }
         schedule("rules", every: 7 * 24 * 3600) { controller in
             guard controller.settings.autoUpdateRules else { return }
@@ -24,6 +24,7 @@ final class Scheduler {
         schedule("node-health", every: 15 * 60) { controller in
             await controller.checkSelectedNode()
             await controller.checkFailover()
+            await controller.checkFailingNodes()
             controller.installStagedUpdateIfIdle()
         }
         schedule("traffic", every: 3600) { controller in

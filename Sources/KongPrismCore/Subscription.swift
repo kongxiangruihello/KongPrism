@@ -114,6 +114,8 @@ public struct SubscriptionUsage: Codable, Equatable, Sendable {
     public var download: Int64
     public var total: Int64
     public var expire: Date?
+    /// Only "剩余 168 GB" is known (read from an information entry, no total).
+    public var remaining: Int64?
 
     public init(upload: Int64, download: Int64, total: Int64, expire: Date?) {
         self.upload = upload
@@ -140,8 +142,13 @@ public struct SubscriptionUsage: Codable, Equatable, Sendable {
 
     /// "已用 12.3 GB / 200 GB · 2027-01-31 到期"
     public var summary: String {
-        var text = "已用 \(Self.bytes(used))"
-        if total > 0 { text += " / \(Self.bytes(total))" }
+        var text: String
+        if let remaining, total == 0, used == 0 {
+            text = "剩余 \(Self.bytes(remaining))"
+        } else {
+            text = "已用 \(Self.bytes(used))"
+            if total > 0 { text += " / \(Self.bytes(total))" }
+        }
         if let expire {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "zh_CN")

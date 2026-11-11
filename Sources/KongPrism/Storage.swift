@@ -120,6 +120,10 @@ struct AppSettings: Codable, Equatable {
     var favoriteNodes: [String] = []
     var customRuleSets: [CustomRuleSetSetting] = []
     var onboardingDone = false
+    /// 0.6 features
+    var avoidFailingNodes = true
+    /// 0 = no limit; otherwise automatic groups skip nodes with a higher 流量倍率.
+    var maxMultiplier: Double = 0
     /// Bumped when a default changes for everyone (see the migration in init(from:)).
     var settingsVersion = AppSettings.currentVersion
 
@@ -178,6 +182,8 @@ struct AppSettings: Codable, Equatable {
         favoriteNodes = v(.favoriteNodes, d.favoriteNodes)
         customRuleSets = v(.customRuleSets, d.customRuleSets)
         onboardingDone = v(.onboardingDone, d.onboardingDone)
+        avoidFailingNodes = v(.avoidFailingNodes, d.avoidFailingNodes)
+        maxMultiplier = v(.maxMultiplier, d.maxMultiplier)
         let version = v(.settingsVersion, 1)
         // 0.1.0 resolved unknown domains through the domestic DNS and sent the IP to the
         // proxy, which broke sites with polluted answers; turn that off once for everyone.
@@ -207,6 +213,7 @@ struct AppSettings: Codable, Equatable {
         options.proxyDomains = proxyDomains
         options.tun = tunMode
         options.serviceTargets = serviceTargets
+        options.maxMultiplier = maxMultiplier > 0 ? maxMultiplier : nil
         // Only rule-sets that downloaded at least once (sing-box refuses a missing local file).
         options.customRuleSets = customRuleSets.compactMap { custom in
             guard custom.enabled, let set = custom.ruleSet,
@@ -231,6 +238,8 @@ struct Profile: Codable, Equatable, Identifiable {
     var format: String?
     var skipped = 0
     var lastError: String?
+    /// Automatic updates wait until then after the provider refused (manual updates do not).
+    var pausedUntil: Date?
 
     var isRemote: Bool { url != nil }
 }

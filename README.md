@@ -7,12 +7,12 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 
 | | |
 |---|---|
-| 订阅 | Clash / Mihomo YAML、sing-box JSON、Base64、节点链接；显示已用流量和到期日；定时自动更新；流量将尽 / 快到期时菜单提醒；可合并多个订阅 |
+| 订阅 | Clash / Mihomo YAML、sing-box JSON、Base64、节点链接；显示已用 / 剩余流量和到期日（也能从“有效期…, 剩余…”条目读出）；被机场拒绝后自动暂停更新；定时自动更新；流量将尽 / 快到期时菜单提醒；可合并多个订阅 |
 | 方便导入 | 机场网页“一键导入 Clash / sing-box”直接唤起 KongPrism；打开菜单即识别剪贴板里的订阅地址、节点或二维码截图；拖入文件/链接；从文件导入 |
 | 协议 | Shadowsocks（含 2022、obfs / v2ray-plugin）、VMess、VLESS（Vision / Reality）、Trojan、Hysteria2（端口跳跃）、TUIC、AnyTLS、SOCKS5 |
 | 传输 | TCP、WebSocket（含 early data）、gRPC、HTTP/2、HTTPUpgrade |
 | 分流 | 规则 / 全局 / 直连；国内域名直连、国外域名走代理、未知域名按 IP 归属分流、广告拦截、自定义直连/代理域名；按服务（AI、YouTube、Netflix）指定地区；自定义远程规则集（sing-box / Clash 格式，直连 / 代理 / 拦截） |
-| 节点 | 自动选择最快节点；按地区自动分组；菜单里一键测速、切换；收藏节点排在最前 |
+| 节点 | 自动选择最快节点；按地区自动分组；菜单里一键测速、切换；收藏节点排在最前；自动避开连不上的节点；识别流量倍率，可只用低倍率节点；近 24 小时失败次数 |
 | 在线更新 | App 本体、sing-box 内核、规则集、订阅，全部可在 App 内更新，下载优先走自身代理 |
 | 其他 | 登录时启动、局域网共享、复制终端代理命令、崩溃后自动恢复系统代理 |
 

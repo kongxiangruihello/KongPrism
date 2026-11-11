@@ -53,9 +53,12 @@ public struct ExitInfo: Equatable, Sendable {
         return code.unicodeScalars.compactMap { Unicode.Scalar(127397 + $0.value) }.map { String($0) }.joined()
     }
 
+    /// "香港", or the English name / code when there is no Chinese one.
+    public var placeName: String { countryCode.flatMap { Self.chineseNames[$0] } ?? country ?? countryCode ?? "未知地区" }
+
     /// "🇭🇰 香港 · 203.0.113.5 · Example Networks"
     public var summary: String {
-        let place = countryCode.flatMap { Self.chineseNames[$0] } ?? country ?? countryCode ?? "未知地区"
+        let place = placeName
         var parts = ["\(flag) \(place)", ip]
         if let organization, !organization.isEmpty { parts.append(organization.count > 28 ? String(organization.prefix(28)) + "…" : organization) }
         return parts.joined(separator: " · ")

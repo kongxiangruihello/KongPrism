@@ -66,6 +66,10 @@ enum Diagnostics {
             if let host = profile.url.flatMap({ URL(string: $0)?.host }) { text += "，订阅域名 \(host)" }
             lines.append(Line(ok: profile.nodeCount > 0, text: text))
             if let error = profile.lastError { lines.append(Line(ok: false, text: "上次更新失败：\(error)")) }
+            if let until = profile.pausedUntil, until > Date() {
+                lines.append(Line(ok: nil, text: "订阅服务器上次拒绝了请求，自动更新暂停到 \(until.formatted(date: .omitted, time: .shortened))（手动“立即更新”不受影响）"))
+            }
+            if let usage = profile.usage { lines.append(Line(ok: usage.warning() == nil ? nil : false, text: "用量：\(usage.summary)")) }
             let stored = controller.activeNodes()
             let informational = stored.filter { NodeFilter.isInformational($0.name) }
             let sample = stored.prefix(6).map { "\($0.name)（\($0.protocolLabel)）" }.joined(separator: "、")
@@ -114,6 +118,12 @@ enum Diagnostics {
         if !controller.droppedNodes.isEmpty {
             lines.append(Line(ok: nil, text: "被内核跳过的节点：\(controller.droppedNodes.prefix(5).joined(separator: "、"))\(controller.droppedNodes.count > 5 ? " 等 \(controller.droppedNodes.count) 个" : "")"))
         }
+
+        let avoided = controller.avoidedNodes.filter { $0.value > Date() }
+        if !avoided.isEmpty {
+            lines.append(Line(ok: nil, text: "自动选择正在避开：\(avoided.keys.sorted().joined(separator: "、"))（近 15 分钟连不上 5 次以上，1 小时后恢复）"))
+        }
+        if let mismatch = controller.exitMismatch { lines.append(Line(ok: nil, text: "出口：\(mismatch)（仅供参考）")) }
 
         // 7. Recent core errors
         if settings.tunMode {

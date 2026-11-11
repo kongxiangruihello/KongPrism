@@ -133,6 +133,12 @@ public struct CoreOptions: Equatable, Sendable {
     /// User rule-sets (自定义规则集) with where they send traffic: "direct", "proxy" or "reject".
     public var customRuleSets: [CustomRule] = []
 
+    /// Nodes that kept failing real connections (自动避开): left out of the automatic groups
+    /// (自动选择, regions, services) for a while, but still selectable by hand.
+    public var avoidNodes: Set<String> = []
+    /// Leave nodes with a higher traffic multiplier (流量倍率) out of the automatic groups; nil = no limit.
+    public var maxMultiplier: Double?
+
     public var routedServices: [Service] {
         Service.allCases.filter { (serviceTargets[$0.rawValue] ?? Service.follow) != Service.follow }
     }
@@ -172,6 +178,16 @@ public enum ConfigBuilder {
         let backupTags = realBackup.map(\.name)
         let realTags = primaryTags + backupTags
 
+        // Automatic groups skip avoided and too-expensive nodes, unless that would empty them.
+        func automatic(_ members: [String]) -> [String] {
+            let kept = members.filter { name in
+                if options.avoidNodes.contains(name) { return false }
+                if let limit = options.maxMultiplier, let rate = NodeFilter.multiplier(name), rate > limit + 0.0001 { return false }
+                return true
+            }
+            return kept.isEmpty ? members : kept
+        }
+
         // Groups
         var groupOutbounds: [JSONValue] = []
         var regionNames: [String] = []
@@ -180,7 +196,7 @@ public enum ConfigBuilder {
                 let members = realPrimary.filter { Region.of($0.name) == region }.map(\.name)
                 guard members.count >= 2 else { continue }
                 regionNames.append(region.groupName)
-                groupOutbounds.append(urltest(region.groupName, members, options))
+                groupOutbounds.append(urltest(region.groupName, automatic(members), options))
             }
         }
         // 按服务分流: each routed service gets its own fastest-node group (tested only while used).
@@ -196,13 +212,13 @@ public enum ConfigBuilder {
                 members = realPrimary.filter { Region.of($0.name)?.code == target }.map(\.name)
             }
             if members.isEmpty { members = primaryTags } // no node there: fall back to all
-            groupOutbounds.append(urltest(service.groupName, members, options))
+            groupOutbounds.append(urltest(service.groupName, automatic(members), options))
             serviceOutbound[service] = service.groupName
         }
         var selectorMembers: [String] = []
         if !primaryTags.isEmpty {
             selectorMembers.append(Groups.auto)
-            groupOutbounds.insert(urltest(Groups.auto, primaryTags, options), at: 0)
+            groupOutbounds.insert(urltest(Groups.auto, automatic(primaryTags), options), at: 0)
         }
         selectorMembers += regionNames
         if !backupTags.isEmpty {

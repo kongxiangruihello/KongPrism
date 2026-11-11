@@ -40,7 +40,16 @@ enum SubscriptionFetcher {
         return ["Clash.Meta", first] + agents.filter { $0 != first && $0 != "Clash.Meta" }
     }
 
-    static func fetch(url: String, userAgent: String?, remembered: String? = nil, routes: [Net.Route]) async throws -> Fetched {
+    /// The provider refused (403 / 401 / 429 or a "访问受限" placeholder) — automatic updates pause.
+    struct Refused: LocalizedError {
+        let message: String
+        let retryAfter: TimeInterval?
+        var errorDescription: String? { message }
+    }
+
+    /// `automatic`: a scheduled update tries only a few identities (the remembered one first), so a
+    /// provider that limits request rates is not hit a dozen times in a row.
+    static func fetch(url: String, userAgent: String?, remembered: String? = nil, routes: [Net.Route], automatic: Bool = false) async throws -> Fetched {
         guard let address = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
               address.scheme == "http" || address.scheme == "https" else {
             throw CoreManager.CoreError("订阅地址无效")
@@ -55,6 +64,8 @@ enum SubscriptionFetcher {
         for agent in [userAgent, remembered].compactMap({ $0 }) + agents(for: address) where !agent.isEmpty && !candidates.contains(agent) {
             candidates.append(agent)
         }
+        if automatic { candidates = Array(candidates.prefix(remembered == nil ? 3 : 2)) }
+        var retryAfter: TimeInterval?
         for agent in candidates {
             do {
                 let (data, response) = try await Net.get(address, headers: headers(agent: agent, url: address), routes: routes, timeout: 20)
@@ -72,7 +83,12 @@ enum SubscriptionFetcher {
                 return Fetched(result: result, usage: usage, suggestedName: name, agent: agent, data: data)
             } catch let error as Net.HTTPError {
                 lastError = error
-                if error.status == 403 || error.status == 401 { refusals += 1 }
+                if [401, 403, 429].contains(error.status) { refusals += 1 }
+                if let wait = error.retryAfter { retryAfter = max(retryAfter ?? 0, wait) }
+                // Too many requests: another identity will not help, stop here.
+                if error.status == 429 {
+                    throw Refused(message: "订阅服务器表示请求太频繁（HTTP 429）" + (error.detail.map { "：\($0)" } ?? "") + "，稍后会自动再试", retryAfter: retryAfter)
+                }
                 AppLog.write("订阅 \(address.host ?? "")：UA \(agent) → HTTP \(error.status)\(error.detail.map { "（\($0)）" } ?? "")")
                 if let detail = error.detail { serverSays = detail }
                 if error.status == 404 { break }
@@ -84,9 +100,10 @@ enum SubscriptionFetcher {
             }
         }
         if refusals > 0 {
-            throw CoreManager.CoreError("订阅服务器拒绝了 KongPrism 尝试的 \(candidates.count) 种客户端身份（HTTP 403 / 访问受限）。"
+            throw Refused(message: "订阅服务器拒绝了 KongPrism 尝试的 \(candidates.count) 种客户端身份（HTTP 403 / 访问受限）。"
                 + (serverSays.map { "服务器说：“\($0)”。" } ?? "")
-                + "请在 设置 › 订阅 › 右键“编辑…”里，把 User-Agent 填成你能正常使用的那个客户端的名称（例如 ClashX 或 Clash Verge），再点“立即更新”")
+                + "请在 设置 › 订阅 › 右键“编辑…”里，把 User-Agent 填成你能正常使用的那个客户端的名称（例如 ClashX 或 Clash Verge），再点“立即更新”"
+                + (automatic ? "。自动更新会暂停一段时间，避免被机场判定为请求过多" : ""), retryAfter: retryAfter)
         }
         throw lastError
     }

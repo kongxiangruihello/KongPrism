@@ -90,6 +90,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let item = NSMenuItem(title: "出口：" + exit.summary, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
+            if let mismatch = controller.exitMismatch {
+                let note = NSMenuItem(title: "    " + mismatch, action: nil, keyEquivalent: "")
+                note.isEnabled = false
+                note.toolTip = "IP 归属来自公开数据库，中转线路或数据库滞后时也会不一致；只作参考"
+                menu.addItem(note)
+            }
         }
         if let notice = CrashRecords.notice {
             let item = action("⚠︎ " + notice + "（点此不再提示）", #selector(dismissCrashNotice), key: "")

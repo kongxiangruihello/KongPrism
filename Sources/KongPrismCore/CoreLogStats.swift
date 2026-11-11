@@ -26,7 +26,33 @@ public enum CoreLogStats {
     static let nodeFailureMarkers = ["i/o timeout", "operation timed out", "context deadline exceeded", "connection refused",
                                      "connection reset by peer", "handshake", "tls:", "EOF"]
 
-    public static func summarize(_ log: String) -> Summary {
+    /// "+0800 2026-11-11 15:47:10" (sing-box writes the zone offset first).
+    static let stampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "Z yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+    static let localFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    public static func date(ofLine line: String) -> Date? {
+        guard let range = line.range(of: #"([+-]\d{4} )?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"#, options: .regularExpression) else { return nil }
+        let stamp = String(line[range])
+        return stamp.first == "+" || stamp.first == "-" ? stampFormatter.date(from: stamp) : localFormatter.date(from: stamp)
+    }
+
+    /// Nodes with at least `threshold` failed connections since `since` (自动避开).
+    public static func failingNodes(_ log: String, since: Date, threshold: Int) -> [NodeFailures] {
+        summarize(log, since: since).nodes.filter { $0.count >= threshold }
+    }
+
+    /// `since`: only lines at or after this moment (lines without a time are skipped then).
+    public static func summarize(_ log: String, since: Date? = nil) -> Summary {
         var summary = Summary()
         var counts: [String: Int] = [:]
         var hosts: [String: [String: Int]] = [:]
@@ -37,6 +63,9 @@ public enum CoreLogStats {
             let line = String(raw)
             guard line.contains("ERROR") else { continue }
             let range = NSRange(line.startIndex..., in: line)
+            if let since {
+                guard let stamp = Self.date(ofLine: line), stamp >= since else { continue }
+            }
             if let match = time?.firstMatch(in: line, range: range), let r = Range(match.range, in: line) {
                 if summary.firstTime == nil { summary.firstTime = String(line[r]) }
                 summary.lastTime = String(line[r])

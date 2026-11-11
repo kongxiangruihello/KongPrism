@@ -25,6 +25,8 @@ enum Net {
         let url: URL
         /// What the error page says (e.g. a provider's "访问受限" message), if readable.
         var detail: String? = nil
+        /// Seconds from a Retry-After header (429 / 503), if the server sent one.
+        var retryAfter: TimeInterval? = nil
         var errorDescription: String? {
             "服务器返回 HTTP \(status)（\(url.host ?? url.absoluteString)）" + (detail.map { "：\($0)" } ?? "")
         }
@@ -59,6 +61,17 @@ enum Net {
         return configuration
     }
 
+    /// Retry-After is either seconds or an HTTP date (RFC 9110, section 10.2.3).
+    static func retryAfter(_ value: String?) -> TimeInterval? {
+        guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return nil }
+        if let seconds = TimeInterval(value) { return max(0, seconds) }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value).map { max(0, $0.timeIntervalSinceNow) }
+    }
+
     static func session(_ route: Route, timeout: TimeInterval = 20, delegate: URLSessionDelegate? = nil) -> URLSession {
         URLSession(configuration: configuration(route, timeout: timeout), delegate: delegate, delegateQueue: nil)
     }
@@ -75,7 +88,8 @@ enum Net {
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
                 guard (200..<300).contains(http.statusCode) else {
-                    throw HTTPError(status: http.statusCode, url: url, detail: ResponseSnippet.make(data))
+                    throw HTTPError(status: http.statusCode, url: url, detail: ResponseSnippet.make(data),
+                                    retryAfter: Net.retryAfter(http.value(forHTTPHeaderField: "Retry-After")))
                 }
                 return (data, http)
             } catch {

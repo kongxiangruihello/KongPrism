@@ -56,6 +56,18 @@ SS_PID=$!
 mkdir -p "$work/www"
 cat > "$work/www/sub.yaml" <<YAML
 proxies:
+  - name: 有效期2029-11-09, 剩余 168.16 GB
+    type: ss
+    server: $IP
+    port: $SSPORT
+    cipher: aes-128-gcm
+    password: ci-password
+  - name: CI-Expensive 倍率:3
+    type: ss
+    server: $IP
+    port: $SSPORT
+    cipher: aes-128-gcm
+    password: ci-password
   - name: CI-SS
     type: ss
     server: $IP
@@ -97,7 +109,7 @@ cat > "$SUPPORT/settings.json" <<JSON
 {"mixedPort": $PORT, "apiPort": $API, "apiSecret": "$SECRET", "setSystemProxy": $SYSTEM_PROXY,
  "connectOnLaunch": false, "onboardingDone": true, "autoCheckAppUpdates": false, "autoCheckCoreUpdates": false,
  "autoUpdateRules": false, "hotKeyEnabled": false, "selectedProfileID": "$PROFILE_ID",
- "favoriteNodes": ["CI-Fav"],
+ "favoriteNodes": ["CI-Fav"], "maxMultiplier": 1,
  "customRuleSets": [{"id": "$RULE_ID", "name": "CI 拦截", "url": "http://127.0.0.1:$SUBPORT/block.yaml", "target": "reject", "enabled": true}]}
 JSON
 cat > "$SUPPORT/profiles.json" <<JSON
@@ -113,8 +125,16 @@ test -f "$SUPPORT/running.marker" && echo "运行标记已创建"
 
 step "更新订阅"
 link update
-wait_for 40 python3 -c "import json,sys; p=json.load(open(sys.argv[1])); sys.exit(0 if p[0]['nodeCount']==2 else 1)" "$SUPPORT/profiles.json"
-python3 -c "import json,sys; p=json.load(open(sys.argv[1]))[0]; print('订阅：', p['nodeCount'], '个节点，格式', p.get('format'), '，UA', p.get('workingUserAgent'))" "$SUPPORT/profiles.json"
+wait_for 40 python3 -c "import json,sys; p=json.load(open(sys.argv[1])); sys.exit(0 if p[0]['nodeCount']==4 else 1)" "$SUPPORT/profiles.json"
+python3 - "$SUPPORT/profiles.json" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1]))[0]
+print("订阅：", p["nodeCount"], "个条目，格式", p.get("format"), "，UA", p.get("workingUserAgent"), "，用量", p.get("usage"))
+usage = p.get("usage") or {}
+assert usage.get("remaining", 0) > 168 * 1024**3, "没有从信息条目读出剩余流量"
+assert "expire" in usage, "没有从信息条目读出到期日"
+print("✅ 从“有效期…, 剩余…”条目读出了到期日和剩余流量")
+PY
 
 step "更新规则集（含自定义远程规则集）"
 link rules
@@ -133,6 +153,12 @@ assert "CI-SS" in tags and "CI-Fav" in tags, tags
 sets = [s["tag"] for s in c["route"]["rule_set"]]
 assert "custom-5e7b1c2d" in sets, sets
 print("配置：节点", [t for t in tags if t.startswith("CI-")], "，规则集", sets)
+groups = {o["tag"]: o.get("outbounds", []) for o in c["outbounds"] if o.get("type") in ("urltest", "selector")}
+auto = groups["自动选择"]
+assert "CI-Expensive 倍率:3" not in auto and "CI-SS" in auto, auto
+assert "CI-Expensive 倍率:3" in groups["节点选择"], groups["节点选择"]
+assert not any(t.startswith("有效期") for t in tags), "信息条目不应进配置"
+print("✅ 倍率上限 1：自动选择不含 CI-Expensive（3 倍），手选列表里仍有")
 PY
 if [[ "$SYSTEM_PROXY" == true ]]; then
   scutil --proxy | tee "$work/proxy.txt"

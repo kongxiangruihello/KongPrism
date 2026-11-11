@@ -52,6 +52,23 @@ public enum NodeFilter {
         return name.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
+    /// Traffic multiplier written in a node name: "流量倍率:0.2", "倍率 2", "0.5x 流量", "2倍", "[1.5x]".
+    public static func multiplier(_ name: String) -> Double? {
+        let patterns = [
+            #"(?:倍率|倍数|计费|rate|ratio)\s*[:：=]?\s*[xX×]?\s*([0-9]+(?:\.[0-9]+)?)"#,
+            #"(?<![0-9A-Za-z.])([0-9]+(?:\.[0-9]+)?)\s*(?:[xX×](?![A-Za-z0-9])|倍)"#,
+            #"(?<![A-Za-z0-9])[xX×]\s*([0-9]+(?:\.[0-9]+)?)(?![0-9])"#,
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                  let match = regex.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
+                  let range = Range(match.range(at: 1), in: name), let value = Double(name[range]),
+                  value > 0, value <= 100 else { continue }
+            return value
+        }
+        return nil
+    }
+
     /// The real servers of a subscription. If every entry would be dropped, the filter must be
     /// wrong for this provider, so nothing is dropped.
     public static func realNodes(_ nodes: [ProxyNode]) -> [ProxyNode] {

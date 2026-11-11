@@ -226,10 +226,12 @@ enum ProblemReport {
             "合并订阅：\(s.mergeAllProfiles)　备用订阅：\(s.backupProfileID != nil)",
             "网络规则 \(s.networkRules.count) 条　iCloud 同步：\(s.iCloudSync)",
             "自定义规则集：\(s.customRuleSets.map(\.summaryLine).joined(separator: "，"))　收藏节点 \(s.favoriteNodes.count) 个",
+            "自动避开连不上的节点：\(s.avoidFailingNodes)　倍率上限：\(s.maxMultiplier > 0 ? String(s.maxMultiplier) : "不限")",
             "订阅：",
         ]
         for profile in controller.profiles {
             lines.append("  · \(profile.name)：\(profile.nodeCount) 个节点，\(profile.format ?? "?")，UA \(profile.workingUserAgent ?? "-")\(profile.lastError.map { "，错误：\($0)" } ?? "")")
+            if let usage = profile.usage { lines.append("    用量：\(usage.summary)") }
         }
         lines.append("（不含订阅链接、令牌和控制密钥）")
         return lines.joined(separator: "\n")
