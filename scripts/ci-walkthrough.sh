@@ -155,14 +155,17 @@ echo "✅ 已拦截"
 
 step "切换节点（收藏的 CI-Fav）"
 link "node/CI-Fav"
-wait_for 10 bash -c "curl -sS -H 'Authorization: Bearer $SECRET' http://127.0.0.1:$API/proxies/%E8%8A%82%E7%82%B9%E9%80%89%E6%8B%A9 | grep -q '\"now\":\"CI-Fav\"'"
+now_selected() { api /proxies | python3 -c 'import json,sys; print(json.load(sys.stdin)["proxies"]["节点选择"].get("now",""))'; }
+selected_is_fav() { [[ "$(now_selected)" == CI-Fav ]]; }
+if ! wait_for 15 selected_is_fav; then echo "节点选择现在是：$(now_selected)"; exit 1; fi
 echo "✅ 节点选择 → CI-Fav"
 code="$(curl -sS -m 20 -x "http://127.0.0.1:$PORT" -o /dev/null -w '%{http_code}' https://www.google.com/generate_204)"
 echo "经 CI-Fav：HTTP $code"; test "$code" = 204
 
 step "全局模式"
 link "mode/global"
-wait_for 10 bash -c "curl -sS -H 'Authorization: Bearer $SECRET' http://127.0.0.1:$API/configs | grep -qi '\"mode\":\"global\"'"
+mode_is_global() { api /configs | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["mode"].lower()=="global" else 1)'; }
+if ! wait_for 10 mode_is_global; then api /configs; exit 1; fi
 echo "✅ 出站模式：全局"
 link "mode/rule"
 

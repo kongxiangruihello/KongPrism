@@ -376,6 +376,7 @@ final class AppController: ObservableObject {
         Task {
             do {
                 try await api.select(name, in: group)
+                AppLog.write("\(group) → \(name)")
                 await refreshSnapshot()
             } catch {
                 AppLog.write("切换节点失败：\(error.localizedDescription)")
