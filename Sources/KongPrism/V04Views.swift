@@ -97,7 +97,7 @@ struct LANShareView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("其他设备的代理地址").font(.caption).foregroundStyle(.secondary)
                     Text(address).font(.system(.title3, design: .monospaced)).textSelection(.enabled)
-                    Text("iPhone / iPad：设置 › 无线局域网 › 当前网络的 ⓘ › 配置代理 › 手动，服务器填 \(ip)，端口填 \(controller.settings.mixedPort)。也可以用相机扫码后复制地址。HTTP 与 SOCKS5 共用这个端口。")
+                    Text("iPhone / iPad：设置 › 无线局域网 › 当前网络的 ⓘ › 配置代理 › 手动，服务器填 \(ip)，端口填 \(String(controller.settings.mixedPort))。也可以用相机扫码后复制地址。HTTP 与 SOCKS5 共用这个端口。")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("同一网络里的任何设备都能使用，不用时请关掉。").font(.caption).foregroundStyle(.orange)
                 }

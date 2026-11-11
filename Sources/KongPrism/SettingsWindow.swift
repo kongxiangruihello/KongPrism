@@ -334,7 +334,7 @@ struct NetworkSettingsView: View {
             Section("系统代理") {
                 Toggle("开启代理时设置系统代理", isOn: $controller.settings.setSystemProxy)
                     .disabled(controller.settings.tunMode)
-                Text("关闭后只运行内核，可在浏览器插件或终端里手动指向 127.0.0.1:\(controller.settings.mixedPort)。")
+                Text("关闭后只运行内核，可在浏览器插件或终端里手动指向 127.0.0.1:\(String(controller.settings.mixedPort))。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("按网络自动切换") {

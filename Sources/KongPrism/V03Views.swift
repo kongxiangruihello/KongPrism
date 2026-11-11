@@ -201,7 +201,7 @@ struct NetworkRulesView: View {
                 }
             }
             HStack {
-                TextField("名称，如“家里”“单位”", text: $name).frame(maxWidth: 180)
+                TextField("名称", text: $name, prompt: Text("如“家里”“单位”")).labelsHidden().frame(maxWidth: 160)
                 Picker("连上时", selection: $action) {
                     ForEach(NetworkRule.Action.allCases) { Text($0.title).tag($0) }
                 }

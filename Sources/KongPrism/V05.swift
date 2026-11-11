@@ -383,7 +383,7 @@ struct OnboardingView: View {
                     }
                     if case .failed(let message) = controller.status { Text(message).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
                 } else if step > 2 {
-                    Text("已连接，系统代理指向 127.0.0.1:\(controller.settings.mixedPort)").foregroundStyle(.secondary)
+                    Text("已连接，系统代理指向 127.0.0.1:\(String(controller.settings.mixedPort))").foregroundStyle(.secondary)
                 }
             }
 
@@ -416,6 +416,7 @@ struct OnboardingView: View {
         .padding(22)
         .frame(width: 520, height: 470)
         .onAppear {
+            if controller.status.isRunning, googleResult == nil { checkGoogle() }
             if input.isEmpty, let text = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
                text.hasPrefix("http"), !text.contains("\n"), text.count < 2000 {
                 input = text
