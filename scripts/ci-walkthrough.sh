@@ -147,10 +147,11 @@ echo "HTTP $code"; test "$code" = 204
 api /connections | python3 -c 'import json,sys; c=json.load(sys.stdin); print("经过内核的下载字节：", c["downloadTotal"]); assert c["downloadTotal"] > 0'
 
 step "自定义规则集拦截 example.com"
-if curl -sS -m 10 -x "http://127.0.0.1:$PORT" -o /dev/null -w '%{http_code}' http://www.example.com/ 2>"$work/reject.txt"; then
-  echo "❌ example.com 没有被拦截"; exit 1
-fi
-echo "✅ 已拦截：$(cat "$work/reject.txt")"
+# Through the HTTP proxy a rejected connection comes back as 502 (or no response at all).
+code="$(curl -sS -m 10 -x "http://127.0.0.1:$PORT" -o /dev/null -w '%{http_code}' http://www.example.com/ 2>"$work/reject.txt" || true)"
+echo "example.com 经代理：HTTP ${code} $(cat "$work/reject.txt")"
+case "$code" in 2*|3*) echo "❌ example.com 没有被拦截"; exit 1 ;; esac
+echo "✅ 已拦截"
 
 step "切换节点（收藏的 CI-Fav）"
 link "node/CI-Fav"
