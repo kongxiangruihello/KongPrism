@@ -22,7 +22,11 @@ enum Net {
     struct HTTPError: LocalizedError {
         let status: Int
         let url: URL
-        var errorDescription: String? { "服务器返回 HTTP \(status)（\(url.host ?? url.absoluteString)）" }
+        /// What the error page says (e.g. a provider's "访问受限" message), if readable.
+        var detail: String? = nil
+        var errorDescription: String? {
+            "服务器返回 HTTP \(status)（\(url.host ?? url.absoluteString)）" + (detail.map { "：\($0)" } ?? "")
+        }
     }
 
     static func configuration(_ route: Route, timeout: TimeInterval) -> URLSessionConfiguration {
@@ -69,7 +73,9 @@ enum Net {
             do {
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-                guard (200..<300).contains(http.statusCode) else { throw HTTPError(status: http.statusCode, url: url) }
+                guard (200..<300).contains(http.statusCode) else {
+                    throw HTTPError(status: http.statusCode, url: url, detail: ResponseSnippet.make(data))
+                }
                 return (data, http)
             } catch {
                 AppLog.write("请求失败（\(route.label)）\(url.host ?? ""): \(error.localizedDescription)")

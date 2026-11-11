@@ -61,3 +61,24 @@ public struct ExitInfo: Equatable, Sendable {
         return parts.joined(separator: " · ")
     }
 }
+
+/// The readable part of an error page ("访问受限：请使用官方客户端" from a 403), for logs and
+/// error messages. HTML tags are dropped, whitespace collapsed, at most `limit` characters.
+public enum ResponseSnippet {
+    public static func make(_ data: Data, limit: Int = 80) -> String? {
+        guard !data.isEmpty, data.count < 200_000, var text = String(data: data, encoding: .utf8) else { return nil }
+        if let title = text.range(of: "(?is)<title[^>]*>(.*?)</title>", options: .regularExpression) {
+            let inner = String(text[title]).replacingOccurrences(of: "(?is)</?title[^>]*>", with: "", options: .regularExpression)
+            let body = text.replacingOccurrences(of: "(?is)<(script|style|head)[^>]*>.*?</\\1>", with: " ", options: .regularExpression)
+            text = inner + " " + body
+        }
+        text = text.replacingOccurrences(of: "(?s)<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+        // A long unbroken token (a key or a base64 blob) is not a message.
+        if text.count > 40, !text.contains(" "), text.range(of: "[\\u4e00-\\u9fff]", options: .regularExpression) == nil { return nil }
+        return text.count > limit ? String(text.prefix(limit)) + "…" : text
+    }
+}

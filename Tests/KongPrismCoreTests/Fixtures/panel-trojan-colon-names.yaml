@@ -1,0 +1,73 @@
+# 合成样本：按 2026-11-11 用户问题报告里的节点命名还原（服务器、密码均为虚构）。
+# 特点：全 Trojan、端口 465、名称里有不加引号的“流量倍率:0.2”（冒号后无空格）、首条为“有效期…, 剩余…”信息条目。
+port: 7890
+socks-port: 7891
+allow-lan: false
+mode: rule
+proxies:
+  - name: 有效期2029-11-09, 剩余 168.16 GB
+    type: trojan
+    server: info.example.com
+    port: 465
+    password: placeholder-password
+    sni: sni.example.com
+    skip-cert-verify: true
+    udp: true
+  - name: 中国香港-PRO-IPLC-HK1-1-流量倍率:1
+    type: trojan
+    server: hk1.example.com
+    port: 465
+    password: placeholder-password
+    sni: sni.example.com
+    skip-cert-verify: true
+    udp: true
+  - name: 中国香港-PRO-IPLC-HK2-1-流量倍率:1
+    type: trojan
+    server: hk2.example.com
+    port: 465
+    password: placeholder-password
+    sni: sni.example.com
+    skip-cert-verify: true
+    udp: true
+  - name: 中国香港-PRO-HK1-流量倍率:1
+    type: trojan
+    server: hk3.example.com
+    port: 465
+    password: placeholder-password
+    sni: sni.example.com
+    skip-cert-verify: true
+    udp: true
+  - {name: 日本-PRO-JP1-流量倍率:0.2, type: trojan, server: jp1.example.com, port: 465, password: placeholder-password, sni: sni.example.com, skip-cert-verify: true, udp: true}
+  - {name: 日本-PRO-FW-JP2-流量倍率:0.2, type: trojan, server: jp2.example.com, port: 465, password: placeholder-password, sni: sni.example.com, skip-cert-verify: true, udp: true}
+  - name: 新加坡-PRO-FW-SG1-流量倍率:1
+    type: trojan
+    server: sg1.example.com
+    port: 465
+    password: placeholder-password
+    sni: sni.example.com
+    skip-cert-verify: true
+    udp: true
+  - name: 德国-PRO-FW-DE1-流量倍率:0.5
+    type: trojan
+    server: de1.example.com
+    port: 465
+    password: placeholder-password
+    sni: sni.example.com
+    skip-cert-verify: true
+    udp: true
+  - name: 澳大利亚-PRO-FW-AU2-流量倍率:0.5
+    type: trojan
+    server: au2.example.com
+    port: 465
+    password: placeholder-password
+    sni: sni.example.com
+    skip-cert-verify: true
+    udp: true
+proxy-groups:
+  - name: 节点选择
+    type: select
+    proxies:
+      - 中国香港-PRO-IPLC-HK1-1-流量倍率:1
+      - 日本-PRO-JP1-流量倍率:0.2
+rules:
+  - MATCH,节点选择

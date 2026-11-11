@@ -11,6 +11,14 @@ enum SubscriptionFetcher {
         let suggestedName: String?
         /// The User-Agent the provider accepted.
         let agent: String
+        /// The response as downloaded (for 问题报告's anonymized sample).
+        var data = Data()
+    }
+
+    /// The subscription as downloaded, with the same User-Agent fallbacks as an update.
+    static func raw(url: String, userAgent: String?, remembered: String?, routes: [Net.Route]) async throws -> (data: Data, agent: String) {
+        let fetched = try await fetch(url: url, userAgent: userAgent, remembered: remembered, routes: routes)
+        return (fetched.data, fetched.agent)
     }
 
     /// Providers decide the format by User-Agent, and many only answer clients they know
@@ -41,6 +49,7 @@ enum SubscriptionFetcher {
         var usage: SubscriptionUsage?
         var name: String?
         var refusals = 0
+        var serverSays: String?
         // The user's own choice first, then the one that worked last time, then the usual list.
         var candidates: [String] = []
         for agent in [userAgent, remembered].compactMap({ $0 }) + agents(for: address) where !agent.isEmpty && !candidates.contains(agent) {
@@ -60,11 +69,12 @@ enum SubscriptionFetcher {
                     continue
                 }
                 AppLog.write("订阅 \(address.host ?? "")：\(result.format.rawValue)，\(result.nodes.count) 个节点（UA \(agent)）")
-                return Fetched(result: result, usage: usage, suggestedName: name, agent: agent)
+                return Fetched(result: result, usage: usage, suggestedName: name, agent: agent, data: data)
             } catch let error as Net.HTTPError {
                 lastError = error
                 if error.status == 403 || error.status == 401 { refusals += 1 }
-                AppLog.write("订阅 \(address.host ?? "")：UA \(agent) → HTTP \(error.status)")
+                AppLog.write("订阅 \(address.host ?? "")：UA \(agent) → HTTP \(error.status)\(error.detail.map { "（\($0)）" } ?? "")")
+                if let detail = error.detail { serverSays = detail }
                 if error.status == 404 { break }
             } catch let error as URLError {
                 // A network failure will not change with another User-Agent.
@@ -75,6 +85,7 @@ enum SubscriptionFetcher {
         }
         if refusals > 0 {
             throw CoreManager.CoreError("订阅服务器拒绝了 KongPrism 尝试的 \(candidates.count) 种客户端身份（HTTP 403 / 访问受限）。"
+                + (serverSays.map { "服务器说：“\($0)”。" } ?? "")
                 + "请在 设置 › 订阅 › 右键“编辑…”里，把 User-Agent 填成你能正常使用的那个客户端的名称（例如 ClashX 或 Clash Verge），再点“立即更新”")
         }
         throw lastError

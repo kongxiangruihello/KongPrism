@@ -121,7 +121,31 @@ enum Diagnostics {
                               text: TunHelper.isInstalled ? "增强模式（TUN）已开启" : "增强模式已开启，但辅助程序没有安装"))
         }
         if let log = try? String(contentsOf: controller.core.logURL, encoding: .utf8) {
-            let errors = log.split(whereSeparator: \.isNewline).filter { $0.contains("ERROR") || $0.contains("FATAL") }.suffix(5)
+            // Which nodes failed to connect, apart from the bursts logged while the Mac slept or switched networks.
+            let stats = CoreLogStats.summarize(log)
+            if let worst = stats.nodes.first {
+                let period = [stats.firstTime, stats.lastTime].compactMap { $0.map { String($0.suffix(8).prefix(5)) } }.joined(separator: "–")
+                let list = stats.nodes.prefix(3).map { "\($0.node) \($0.count) 次" }.joined(separator: "、")
+                var text = "近期连不上的节点（\(period)）：\(list)"
+                if !worst.hosts.isEmpty { text += "；受影响最多的网站：\(worst.hosts.joined(separator: "、"))" }
+                // A service group may point at a region group (🇯🇵 日本 → 日本 02); follow up to two levels.
+                func resolved(_ group: String) -> String? {
+                    guard let now = snapshot.groups[group]?.now else { return nil }
+                    guard let next = snapshot.groups[now]?.now else { return now }
+                    return snapshot.groups[next]?.now ?? next
+                }
+                let services = Service.allCases.filter { resolved($0.groupName) == worst.node }
+                if !services.isEmpty {
+                    text += "。\(services.map(\.groupName).joined(separator: "、")) 正在用 \(worst.node)，可在 设置 › 分流 › 按服务分流 里换成“自动（排除香港）”等更大的范围"
+                } else if resolved(Groups.select) == worst.node, snapshot.groups[Groups.select]?.now == worst.node {
+                    text += "。这是你手选的节点，可以换一个或改回“自动选择”"
+                }
+                lines.append(Line(ok: worst.count >= 10 ? false : nil, text: text))
+            }
+            if stats.networkDown > 0 {
+                lines.append(Line(ok: nil, text: "另有 \(stats.networkDown) 条是网络暂时不可用时的报错（睡眠、唤醒或切换 Wi-Fi 时常见，不是节点问题）"))
+            }
+            let errors = log.split(whereSeparator: \.isNewline).filter { $0.contains("ERROR") || $0.contains("FATAL") }.suffix(3)
             for line in errors { lines.append(Line(ok: nil, text: "内核日志：" + CheckError.readable(String(line)))) }
         }
         return lines

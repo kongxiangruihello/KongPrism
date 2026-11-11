@@ -166,8 +166,6 @@ enum ProblemReport {
 
             let report = lines.map { ($0.ok == true ? "✅ " : $0.ok == false ? "❌ " : "• ") + $0.text }.joined(separator: "\n")
             write("诊断.txt", "KongPrism \(AppUpdater.version)（\(AppUpdater.build)） · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)\n\n" + report)
-            write("app.log", tail(Paths.appLog, lines: 300))
-            write("core.log", tail(controller.core.logURL, lines: 300))
             write("设置摘要.txt", settingsSummary(controller))
             // Crash reports from ~/Library/Logs/DiagnosticReports (KongPrism and sing-box, last 14 days).
             let crashes = CrashRecords.recentReports(days: 14).prefix(5)
@@ -177,13 +175,24 @@ enum ProblemReport {
                 for report in crashes { try? FileManager.default.copyItem(at: report, to: crashFolder.appendingPathComponent(report.lastPathComponent)) }
                 try? CrashRecords.summary().write(to: crashFolder.appendingPathComponent("说明.txt"), atomically: true, encoding: .utf8)
             }
-            if let profile = controller.selectedProfile, let address = profile.url.flatMap(URL.init(string:)) {
-                let agent = profile.workingUserAgent ?? profile.userAgent ?? SubscriptionFetcher.agents[0]
-                if let (data, _) = try? await Net.get(address, headers: SubscriptionFetcher.headers(agent: agent, url: address),
-                                                      routes: controller.directFirst, timeout: 20) {
-                    write("订阅样本（已脱敏）.yaml", SubscriptionSample.anonymize(String(decoding: data, as: UTF8.self)))
+            // The nodes KongPrism is using, from the local copy: a regression sample even when the
+            // subscription cannot be downloaded right now.
+            let nodes = controller.activeNodes()
+            if !nodes.isEmpty { write("节点结构（已脱敏）.json", NodeSample.anonymizedJSON(nodes: nodes)) }
+            if let profile = controller.selectedProfile, let address = profile.url {
+                do {
+                    let raw = try await SubscriptionFetcher.raw(url: address, userAgent: profile.userAgent,
+                                                                remembered: profile.workingUserAgent, routes: controller.directFirst)
+                    write("订阅样本（已脱敏）.yaml", SubscriptionSample.anonymize(String(decoding: raw.data, as: UTF8.self)))
+                    write("订阅下载.txt", "下载成功：UA \(raw.agent)，\(raw.data.count) 字节")
+                } catch {
+                    write("订阅下载.txt", "下载失败：\(error.localizedDescription)\n（已附上本机缓存的节点结构）")
                 }
             }
+            // Logs last, so they include what happened while making this report.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            write("app.log", tail(Paths.appLog, lines: 400))
+            write("core.log", tail(controller.core.logURL, lines: 400))
             let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
             let zip = desktop.appendingPathComponent("KongPrism-问题报告-\(stamp).zip")
             let result = await Shell.background {
