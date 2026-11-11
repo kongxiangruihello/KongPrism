@@ -28,6 +28,9 @@ final class AppController: ObservableObject {
     @Published private(set) var profiles: [Profile] = []
     @Published private(set) var snapshot = ClashAPI.Snapshot()
     @Published private(set) var droppedNodes: [String] = []
+    /// Nodes loaded from the subscription / put into the running config, for 诊断连接.
+    @Published private(set) var loadedNodeCount = 0
+    @Published private(set) var configNodeCount = 0
     @Published private(set) var coreVersion: String?
     @Published private(set) var latestCore: String?
     @Published private(set) var appRelease: AppUpdater.Found?
@@ -149,6 +152,14 @@ final class AppController: ObservableObject {
                 return
             case .success(let prepared):
                 droppedNodes = prepared.dropped
+                loadedNodeCount = nodes.count
+                configNodeCount = prepared.built.nodeTags.count
+                if prepared.built.nodeTags.isEmpty {
+                    core.stop()
+                    fail(nodes.isEmpty ? "读不到订阅的节点文件，请在 设置 › 订阅 里右键“立即更新”"
+                                       : "订阅的 \(nodes.count) 个节点都没能放进配置（被内核拒绝 \(prepared.dropped.count) 个）。请用“诊断连接”复制报告")
+                    return
+                }
             }
             guard await api.waitUntilReady() else {
                 core.stop()
@@ -167,6 +178,10 @@ final class AppController: ObservableObject {
             status = .running
             settings.wasConnected = true
             await refreshSnapshot()
+            // The core remembers the last choice; "直连" may be left over from a time without nodes.
+            if snapshot.groups[Groups.select]?.now == Groups.direct, !settings.userChoseDirect, snapshot.groups[Groups.auto] != nil {
+                select(Groups.auto, in: Groups.select)
+            }
         }
     }
 
@@ -237,6 +252,7 @@ final class AppController: ObservableObject {
     }
 
     func select(_ name: String, in group: String) {
+        if group == Groups.select { settings.userChoseDirect = (name == Groups.direct) }
         Task {
             do {
                 try await api.select(name, in: group)

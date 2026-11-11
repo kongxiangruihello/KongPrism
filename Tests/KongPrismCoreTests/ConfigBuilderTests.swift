@@ -41,6 +41,18 @@ final class ConfigBuilderTests: XCTestCase {
         XCTAssertEqual(resolve?["server"], "dns-remote")
     }
 
+    func testFilterNeverDropsEverything() throws {
+        let nodes = try (1...3).map { try ShareLinks.parse("trojan://pw@s\($0).example.com:443#剩余流量 节点 \($0)") }
+        XCTAssertEqual(ConfigBuilder.build(nodes: nodes, options: CoreOptions()).nodeTags.count, 3)
+    }
+
+    func testNodesSurviveSavingAndLoading() throws {
+        // The app saves parsed nodes as JSON and loads them again when connecting.
+        let nodes = try nodes()
+        let data = try JSONEncoder().encode(nodes)
+        XCTAssertEqual(try JSONDecoder().decode([ProxyNode].self, from: data), nodes)
+    }
+
     func testEmptyProfileStillBuilds() {
         let built = ConfigBuilder.build(nodes: [], options: CoreOptions())
         let tags = built.json["outbounds"]?.arrayValue?.compactMap { $0["tag"]?.stringValue }
@@ -72,7 +84,12 @@ final class ConfigBuilderTests: XCTestCase {
         XCTAssertNil(Region.of("RUSSIA 01"), "US inside a word must not match")
         XCTAssertEqual(Region.of("日本东京")?.code, "JP")
         XCTAssertTrue(NodeFilter.isInformational("套餐到期：2027-01-01"))
+        XCTAssertTrue(NodeFilter.isInformational("剩余流量：98.5 GB"))
+        XCTAssertTrue(NodeFilter.isInformational("距离下次重置剩余：12 天"))
         XCTAssertFalse(NodeFilter.isInformational("🇸🇬 新加坡 01"))
+        XCTAssertFalse(NodeFilter.isInformational("🇭🇰 香港 02 | 0.5x 流量"))
+        XCTAssertFalse(NodeFilter.isInformational("US Low Traffic 03"))
+        XCTAssertFalse(NodeFilter.isInformational("JP Reset-Free 01"))
     }
 
     /// Bad nodes (wrong key length, transport sing-box lacks) are dropped one by one by the real `sing-box check`.

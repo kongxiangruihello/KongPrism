@@ -86,6 +86,8 @@ struct AppSettings: Codable, Equatable {
     var wasConnected = false
     var selectedProfileID: UUID?
     var mergeAllProfiles = false
+    /// The user picked 直连 in 节点选择 themselves (otherwise a leftover 直连 is switched to 自动选择).
+    var userChoseDirect = false
     var subscriptionIntervalHours = 12
     var autoUpdateRules = true
     var autoCheckAppUpdates = true
@@ -124,6 +126,7 @@ struct AppSettings: Codable, Equatable {
         wasConnected = v(.wasConnected, d.wasConnected)
         selectedProfileID = try? c.decodeIfPresent(UUID.self, forKey: .selectedProfileID)
         mergeAllProfiles = v(.mergeAllProfiles, d.mergeAllProfiles)
+        userChoseDirect = v(.userChoseDirect, d.userChoseDirect)
         subscriptionIntervalHours = v(.subscriptionIntervalHours, d.subscriptionIntervalHours)
         autoUpdateRules = v(.autoUpdateRules, d.autoUpdateRules)
         autoCheckAppUpdates = v(.autoCheckAppUpdates, d.autoCheckAppUpdates)

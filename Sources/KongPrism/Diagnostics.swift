@@ -56,6 +56,15 @@ enum Diagnostics {
             if let host = profile.url.flatMap({ URL(string: $0)?.host }) { text += "，订阅域名 \(host)" }
             lines.append(Line(ok: profile.nodeCount > 0, text: text))
             if let error = profile.lastError { lines.append(Line(ok: false, text: "上次更新失败：\(error)")) }
+            let stored = controller.activeNodes()
+            let informational = stored.filter { NodeFilter.isInformational($0.name) }
+            let sample = stored.prefix(6).map { "\($0.name)（\($0.protocolLabel)）" }.joined(separator: "、")
+            lines.append(Line(ok: stored.isEmpty ? false : nil,
+                              text: "节点文件：\(stored.count) 个，其中信息条目 \(informational.count) 个；前几个：\(sample.isEmpty ? "无" : sample)"))
+            if running {
+                lines.append(Line(ok: controller.configNodeCount > 0,
+                                  text: "内核配置：载入 \(controller.loadedNodeCount) 个，放进配置 \(controller.configNodeCount) 个，被内核拒绝 \(controller.droppedNodes.count) 个"))
+            }
         } else {
             lines.append(Line(ok: false, text: "还没有订阅"))
         }

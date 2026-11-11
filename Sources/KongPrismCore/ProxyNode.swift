@@ -44,9 +44,19 @@ public enum NodeTypes {
 public enum NodeFilter {
     /// Entries many providers put in subscriptions to show remaining traffic, expiry
     /// or their website. They are not real servers, so they stay out of groups.
+    /// Only explicit phrases count: plain words such as "流量" or "Traffic" also appear in real
+    /// node names ("大流量", "0.5x 流量", "Low Traffic").
     public static func isInformational(_ name: String) -> Bool {
-        let pattern = "剩余|到期|过期|流量|官网|网址|重置|套餐|续费|更新订阅|距离下次|expire|traffic|reset|website"
+        let pattern = "剩余流量|已用流量|总流量|流量剩余|套餐到期|到期时间|过期时间|有效期|距离下次|下次重置|重置日|官网|官方网站|网址|续费|更新订阅|订阅已|"
+            + "expire[sd]?\\s*[:：]|remaining|traffic\\s*[:：]|reset\\s*[:：]|website"
         return name.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// The real servers of a subscription. If every entry would be dropped, the filter must be
+    /// wrong for this provider, so nothing is dropped.
+    public static func realNodes(_ nodes: [ProxyNode]) -> [ProxyNode] {
+        let kept = nodes.filter { !isInformational($0.name) }
+        return kept.isEmpty ? nodes : kept
     }
 
     /// Makes names unique ("HK", "HK", "HK" → "HK", "HK 2", "HK 3"); sing-box tags must be unique

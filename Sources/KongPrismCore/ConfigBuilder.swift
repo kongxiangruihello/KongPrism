@@ -71,7 +71,7 @@ public struct BuiltConfig {
 public enum ConfigBuilder {
     public static func build(nodes rawNodes: [ProxyNode], options: CoreOptions) -> BuiltConfig {
         let nodes = NodeFilter.uniqued(rawNodes)
-        let realNodes = nodes.filter { !NodeFilter.isInformational($0.name) }
+        let realNodes = NodeFilter.realNodes(nodes)
         let realTags = realNodes.map(\.name)
 
         // Groups
