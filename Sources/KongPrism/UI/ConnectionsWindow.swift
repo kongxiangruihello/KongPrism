@@ -107,6 +107,7 @@ struct ConnectionsView: View {
                 }.width(min: 90, ideal: 120)
                 TableColumn("") { item in
                     Button { model.close(item.id) } label: { Image(systemName: "xmark.circle") }.buttonStyle(.borderless).help("断开")
+                        .accessibilityLabel("断开这条连接")
                 }.width(28)
             }
         }

@@ -43,12 +43,14 @@ struct NodesView: View {
                 HStack {
                     Image(systemName: current == name ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(current == name ? Color.accentColor : .secondary)
+                        .accessibilityLabel(current == name ? "正在使用" : "未使用")
                     let favorite = controller.settings.favoriteNodes.contains(name)
                     Button { controller.toggleFavorite(name) } label: {
                         Image(systemName: favorite ? "star.fill" : "star").foregroundStyle(favorite ? Color.yellow : .secondary)
                     }
                     .buttonStyle(.borderless)
                     .help(favorite ? "取消收藏" : "收藏：在菜单里排在最前")
+                    .accessibilityLabel(favorite ? "取消收藏 \(name)" : "收藏 \(name)")
                     Text(name)
                     if controller.backupTags.contains(name) {
                         Text("备用").font(.caption2).padding(.horizontal, 4).background(Color.orange.opacity(0.2)).cornerRadius(3)

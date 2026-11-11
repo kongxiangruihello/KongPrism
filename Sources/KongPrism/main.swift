@@ -42,10 +42,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for app in others where !app.isTerminated { app.forceTerminate() }
         }
         AppLog.write("KongPrism \(AppUpdater.version)（\(AppUpdater.build)）启动")
+        // Hidden: `defaults write com.kongxiangrui.KongPrism appearance dark|light` (CI screenshots both).
+        switch UserDefaults.standard.string(forKey: "appearance") {
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        default: break
+        }
         CrashRecords.begin(tookOver: tookOver)
         let menu = StatusMenu()
         menu.openSettings = { [weak self] tab in self?.settings.show(tab) }
         URLActions.openSettings = { [weak self] tab in self?.settings.show(tab) }
+        URLActions.dumpMenu = { [weak menu] in
+            guard let menu else { return "" }
+            return await menu.dump()
+        }
         menu.openConnections = { [weak self] in
             guard let self else { return }
             if self.connectionsWindow == nil { self.connectionsWindow = ConnectionsWindowController() }

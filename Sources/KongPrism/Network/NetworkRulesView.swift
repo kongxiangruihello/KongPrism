@@ -35,6 +35,7 @@ struct NetworkRulesView: View {
                 Text("→ \(rule.action.title)").foregroundStyle(.secondary)
                 Spacer()
                 Button(role: .destructive) { controller.removeNetworkRule(rule.id) } label: { Image(systemName: "trash") }
+                    .accessibilityLabel("删除这条网络规则")
                     .buttonStyle(.borderless)
             }
         }

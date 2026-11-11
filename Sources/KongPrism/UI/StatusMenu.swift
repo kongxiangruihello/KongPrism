@@ -20,6 +20,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.autoenablesItems = false
         item.menu = menu
         item.button?.toolTip = "KongPrism"
+        item.button?.setAccessibilityLabel("KongPrism")
         updateIcon()
         controller.$status.receive(on: RunLoop.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &cancellables)
         controller.$speed.receive(on: RunLoop.main).sink { [weak self] _ in self?.updateSpeed() }.store(in: &cancellables)
@@ -50,6 +51,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         if case .failed = controller.status { failed = true }
         item.button?.image = PrismIcon.menuBar(active: active, failed: failed, mode: controller.settings.mode, tun: controller.settings.tunMode)
         item.button?.toolTip = active ? "KongPrism：已连接" : "KongPrism：未连接"
+        item.button?.setAccessibilityLabel(item.button?.toolTip)
     }
 
     // MARK: NSMenuDelegate
@@ -147,7 +149,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let hint = NSMenuItem(title: "复制订阅地址后再打开此菜单，或点网页上的“一键导入”", action: nil, keyEquivalent: "")
             hint.isEnabled = false
             menu.addItem(hint)
-            menu.addItem(action("新手引导…", #selector(showOnboarding), key: ""))
+            menu.addItem(action("新手引导…", #selector(showOnboarding), key: ""))  // the first thing a new user needs
         }
         menu.addItem(.separator())
 
@@ -168,17 +170,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let nodeItem = NSMenuItem(title: "节点：\(describe(selector.now ?? "—"))", action: nil, keyEquivalent: "")
             nodeItem.submenu = nodeMenu(selector)
             menu.addItem(nodeItem)
-            for service in Service.allCases {
-                guard let group = controller.snapshot.groups[service.groupName], let now = group.now else { continue }
-                let line = NSMenuItem(title: "    \(service.groupName) → \(now)", action: nil, keyEquivalent: "")
-                line.isEnabled = false
-                menu.addItem(line)
-            }
-            if !controller.droppedNodes.isEmpty {
-                let dropped = NSMenuItem(title: "已跳过 \(controller.droppedNodes.count) 个内核不支持的节点", action: nil, keyEquivalent: "")
-                dropped.isEnabled = false
-                menu.addItem(dropped)
-            }
         }
 
         // Profiles
@@ -219,10 +210,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(profileItem)
 
         menu.addItem(.separator())
-        menu.addItem(action("复制终端代理命令", #selector(copyExports), key: "c"))
-        menu.addItem(action("连接…", #selector(showConnections), key: "l"))
-        menu.addItem(action("诊断连接…", #selector(diagnose), key: "d"))
-        menu.addItem(action("生成问题报告", #selector(problemReport), key: ""))
+        // Tools in one submenu (0.7); their shortcuts still work while the menu is open.
+        let tools = NSMenu()
+        tools.autoenablesItems = false
+        tools.addItem(action("复制终端代理命令", #selector(copyExports), key: "c"))
+        tools.addItem(action("连接…", #selector(showConnections), key: "l"))
+        tools.addItem(action("诊断连接…", #selector(diagnose), key: "d"))
+        tools.addItem(action("生成问题报告", #selector(problemReport), key: ""))
+        tools.addItem(.separator())
+        tools.addItem(action("新手引导…", #selector(showOnboarding), key: ""))
+        let toolsItem = NSMenuItem(title: "工具", action: nil, keyEquivalent: "")
+        toolsItem.submenu = tools
+        menu.addItem(toolsItem)
         if controller.appRelease != nil || controller.latestCore != nil {
             let update = action("有可用更新…", #selector(showUpdates), key: "")
             update.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
@@ -237,6 +236,22 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let submenu = NSMenu()
         submenu.autoenablesItems = false
         let snapshot = controller.snapshot
+        // 按服务分流 status first (0.7: moved here from the top level to keep the menu short).
+        var serviceLines = 0
+        for service in Service.allCases {
+            guard let group = snapshot.groups[service.groupName], let now = group.now else { continue }
+            let line = NSMenuItem(title: "\(service.groupName) → \(now)", action: nil, keyEquivalent: "")
+            line.isEnabled = false
+            submenu.addItem(line)
+            serviceLines += 1
+        }
+        if !controller.droppedNodes.isEmpty {
+            let dropped = NSMenuItem(title: "已跳过 \(controller.droppedNodes.count) 个内核不支持的节点", action: nil, keyEquivalent: "")
+            dropped.isEnabled = false
+            submenu.addItem(dropped)
+            serviceLines += 1
+        }
+        if serviceLines > 0 { submenu.addItem(.separator()) }
         var addedSeparator = false
         var hidden = 0
         // 收藏的节点排在分组之后、其他节点之前。
@@ -292,6 +307,27 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         test.isEnabled = !controller.testing
         submenu.addItem(test)
         return submenu
+    }
+
+    // MARK: Text dump (kongprism://menu, for CI: the status menu cannot be screenshotted there)
+
+    /// The menu as indented text, after fetching fresh node state like opening it does.
+    func dump() async -> String {
+        controller.verifyCoreAlive()
+        if controller.status.isRunning { await controller.refreshSnapshot() }
+        build()
+        func lines(_ menu: NSMenu, depth: Int) -> [String] {
+            menu.items.flatMap { item -> [String] in
+                if item.isSeparatorItem { return [String(repeating: "  ", count: depth) + "—"] }
+                if item.isAlternate { return [] }
+                var text = String(repeating: "  ", count: depth) + (item.attributedTitle?.string ?? item.title)
+                if !item.keyEquivalent.isEmpty { text += "  [⌘\(item.keyEquivalent.uppercased())]" }
+                if item.state == .on { text += "  ✓" }
+                if !item.isEnabled && item.submenu == nil { text += "  (灰)" }
+                return [text] + (item.submenu.map { lines($0, depth: depth + 1) } ?? [])
+            }
+        }
+        return lines(menu, depth: 0).joined(separator: "\n")
     }
 
     // MARK: Helpers

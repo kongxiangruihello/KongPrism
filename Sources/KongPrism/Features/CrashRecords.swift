@@ -29,6 +29,52 @@ enum CrashRecords {
         }
         let info = "pid \(ProcessInfo.processInfo.processIdentifier)\nversion \(AppUpdater.version)\nstarted \(ISO8601DateFormatter().string(from: Date()))\n"
         try? info.write(to: marker, atomically: true, encoding: .utf8)
+        checkLaunchHealth()
+    }
+
+    /// 更新后连续启动失败时退回上一个版本: a version that never ran a full minute and ended
+    /// abnormally twice in a row is offered a rollback to the backup kept by the installer.
+    @MainActor
+    private static func checkLaunchHealth() {
+        let defaults = UserDefaults.standard
+        let previousVersion = previousRunInfo.split(separator: "\n").first { $0.hasPrefix("version ") }.map { String($0.dropFirst(8)) }
+        let count = LaunchHealth.abnormalCount(previous: defaults.integer(forKey: "abnormalLaunches"), lastRunEndedAbnormally: lastRunEndedAbnormally,
+                                               previousVersion: previousVersion, currentVersion: AppUpdater.version)
+        defaults.set(count, forKey: "abnormalLaunches")
+        // Running for a minute makes this version the last good one.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+            defaults.set(AppUpdater.version, forKey: "lastGoodVersion")
+            defaults.set(0, forKey: "abnormalLaunches")
+        }
+        let backup = AppUpdater.backupVersion
+        // Before 0.7 nothing recorded the last good version: the installer's backup is it.
+        let lastGood = defaults.string(forKey: "lastGoodVersion") ?? (backup != AppUpdater.version ? backup : nil)
+        guard LaunchHealth.shouldOfferRollback(abnormalCount: count, currentVersion: AppUpdater.version, lastGoodVersion: lastGood, backupVersion: backup),
+              let lastGood else { return }
+        AppLog.write("\(AppUpdater.version) 连续 \(count) 次没有正常运行，提供退回 \(lastGood)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { offerRollback(to: lastGood, failures: count) }
+    }
+
+    @MainActor
+    private static func offerRollback(to previous: String, failures: Int) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "KongPrism \(AppUpdater.version) 连续 \(failures) 次没能正常运行"
+        alert.informativeText = "可以退回上一个版本 \(previous)（更新时保留的备份）。以后仍可在 设置 › 更新与关于 里再次更新；也可以先“生成问题报告”发给开发者。"
+        alert.addButton(withTitle: "退回 \(previous)")
+        alert.addButton(withTitle: "继续使用 \(AppUpdater.version)")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            UserDefaults.standard.set(0, forKey: "abnormalLaunches")
+            return
+        }
+        do {
+            try AppUpdater.rollbackToPrevious()
+        } catch {
+            let failed = NSAlert()
+            failed.messageText = "没能退回 \(previous)"
+            failed.informativeText = error.localizedDescription
+            failed.runModal()
+        }
     }
 
     /// Clean quit.

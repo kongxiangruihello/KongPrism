@@ -25,27 +25,19 @@ extension AppController {
     func checkFailingNodes() async {
         guard settings.avoidFailingNodes, status.isRunning else { return }
         let url = core.logURL
-        let since = Date().addingTimeInterval(-15 * 60)
-        let failing = await Shell.background { CoreLogStats.failingNodes(LogTail.read(url), since: since, threshold: 5) }
-        let now = Date()
-        var pruned = avoidedNodes.filter { $0.value > now }
+        let since = Date().addingTimeInterval(-NodeAvoidance.window)
+        let failing = await Shell.background { CoreLogStats.failingNodes(LogTail.read(url), since: since, threshold: NodeAvoidance.threshold) }
         await refreshSnapshot()
-        // A node picked by hand is the user's choice (checkSelectedNode handles that case).
-        let handPicked = snapshot.groups[Groups.select]?.now
-        var newlyAvoided: [CoreLogStats.NodeFailures] = []
-        for failure in failing where failure.node != handPicked && pruned[failure.node] == nil {
-            pruned[failure.node] = now.addingTimeInterval(3600)
-            newlyAvoided.append(failure)
-        }
-        setAvoidedNodes(pruned)
-        guard !newlyAvoided.isEmpty else { return }
-        let names = newlyAvoided.map { "\($0.node)（\($0.count) 次）" }.joined(separator: "、")
-        AppLog.write("近 15 分钟连不上：\(names)，自动选择暂时避开 1 小时")
-        // In use by an automatic group right now?
+        // What the automatic groups use right now.
         let groups = [Groups.auto] + Service.allCases.map(\.groupName) + Region.all.map(\.groupName)
-        let inUse = groups.compactMap { snapshot.groups[$0]?.now }
-        if newlyAvoided.contains(where: { inUse.contains($0.node) }) {
-            showNodeNotice("\(newlyAvoided[0].node) 近 15 分钟连不上 \(newlyAvoided[0].count) 次，已暂时避开 1 小时")
+        let decision = NodeAvoidance.decide(failing: failing, current: avoidedNodes, handPicked: snapshot.groups[Groups.select]?.now,
+                                            inUse: groups.compactMap { snapshot.groups[$0]?.now })
+        setAvoidedNodes(decision.avoided)
+        guard let first = decision.newlyAvoided.first else { return }
+        let names = decision.newlyAvoided.map { "\($0.node)（\($0.count) 次）" }.joined(separator: "、")
+        AppLog.write("近 15 分钟连不上：\(names)，自动选择暂时避开 1 小时")
+        if decision.reloadNow {
+            showNodeNotice("\(first.node) 近 15 分钟连不上 \(first.count) 次，已暂时避开 1 小时")
             reloadIfRunning()
         }
     }
@@ -61,8 +53,8 @@ extension AppController {
     /// Connections opened before sleep or on the previous network are dead but apps wait for
     /// them to time out. Close them so apps reconnect at once, and re-test the automatic group
     /// for the new network. At most once every 20 seconds.
-    func recoverConnections(reason: String) async {
-        guard status.isRunning, Date().timeIntervalSince(lastRecoveryDate) > 20 else { return }
+    func recoverConnections(reason: String, force: Bool = false) async {
+        guard status.isRunning, force || Date().timeIntervalSince(lastRecoveryDate) > 20 else { return }
         markRecovery()
         await api.closeConnections()
         let groups = [Groups.auto] + options(forRecovery: snapshot)
@@ -91,8 +83,10 @@ extension AppController {
     // MARK: 出口与节点名称
 
     /// "节点名称是日本，出口 IP 归属美国" when they differ (IP databases can be wrong too).
-    var exitMismatch: String? {
-        guard status.isRunning, let exit = exitInfo, let exitCode = exit.countryCode else { return nil }
+    var exitMismatch: String? { exitMismatch(for: exitInfo) }
+
+    func exitMismatch(for exit: ExitInfo?) -> String? {
+        guard status.isRunning, let exit, let exitCode = exit.countryCode else { return nil }
         var name = snapshot.groups[Groups.select]?.now ?? ""
         for _ in 0..<3 { if let next = snapshot.groups[name]?.now { name = next } else { break } }
         guard name != Groups.direct, let nodeCode = NodeCountry.code(for: name), nodeCode != exitCode else { return nil }

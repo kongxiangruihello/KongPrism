@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,6 +23,10 @@ jobs:
         run: |
           sw_vers
           xcrun swift --version
+
+      # VoiceOver: icon-only buttons need a label, controls need a title.
+      - name: Accessibility lint
+        run: python3 scripts/lint-accessibility.py
 
       - name: Test and build
         env:
@@ -123,7 +127,7 @@ jobs:
       # node, node / mode switching, memory, screenshots of each settings page, problem report,
       # disconnect, crash detection. See scripts/ci-walkthrough.sh.
       - name: Real-Mac walkthrough
-        timeout-minutes: 12
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           sudo rm -rf /Applications/KongPrism.app

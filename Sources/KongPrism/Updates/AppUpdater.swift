@@ -171,6 +171,26 @@ enum AppUpdater {
         if quit { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) } }
     }
 
+    /// The copy of the previous version kept by the last installation (see relaunch's script).
+    static var backupApp: URL { Paths.updates.appendingPathComponent("previous/KongPrism.app") }
+    static var backupVersion: String? {
+        NSDictionary(contentsOf: backupApp.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String
+    }
+
+    /// Puts the backup of the previous version back in place and reopens it.
+    @MainActor
+    static func rollbackToPrevious() throws {
+        guard let previous = backupVersion else { throw CoreManager.CoreError("没有找到上一个版本的备份") }
+        let copy = Paths.updates.appendingPathComponent("rollback/KongPrism.app")
+        try? FileManager.default.removeItem(at: copy.deletingLastPathComponent())
+        try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let result = Shell.run("/usr/bin/ditto", [backupApp.path, copy.path])
+        guard result.ok else { throw CoreManager.CoreError("复制上一个版本失败：\(result.output)") }
+        AppLog.write("退回上一个版本 \(previous)（当前 \(version) 连续启动失败）")
+        UserDefaults.standard.set(previous, forKey: "updatingTo")
+        try relaunch(replacingWith: copy, reopen: true)
+    }
+
     /// Called at launch: says whether the update just attempted took effect.
     @MainActor
     static func reportLastUpdate(controller: AppController) {

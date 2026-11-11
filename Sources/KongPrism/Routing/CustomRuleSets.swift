@@ -127,7 +127,7 @@ extension AppController {
         settings.customRuleSets.removeAll { $0.id == id }
         reloadIfRunning()
         // Remove the file after the core has the new config.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { CustomRuleSets.removeFiles(of: entry) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { CustomRuleSets.removeFiles(of: entry) }
     }
 
     func updateCustomRuleSet(_ id: UUID, change: (inout CustomRuleSetSetting) -> Void) {
@@ -184,7 +184,7 @@ struct CustomRuleSetsSection: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(controller.settings.customRuleSets) { entry in
                 HStack {
-                    Toggle("", isOn: Binding(get: { entry.enabled }, set: { on in controller.updateCustomRuleSet(entry.id) { $0.enabled = on } }))
+                    Toggle("启用 \(entry.name)", isOn: Binding(get: { entry.enabled }, set: { on in controller.updateCustomRuleSet(entry.id) { $0.enabled = on } }))
                         .labelsHidden()
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.name)
@@ -193,18 +193,19 @@ struct CustomRuleSetsSection: View {
                             .lineLimit(2).textSelection(.enabled)
                     }
                     Spacer()
-                    Picker("", selection: Binding(get: { entry.target }, set: { value in controller.updateCustomRuleSet(entry.id) { $0.target = value } })) {
+                    Picker("\(entry.name) 走哪条线", selection: Binding(get: { entry.target }, set: { value in controller.updateCustomRuleSet(entry.id) { $0.target = value } })) {
                         ForEach(CustomRuleSetSetting.targets, id: \.self) { Text(CustomRuleSetSetting.targetName($0)).tag($0) }
                     }
                     .labelsHidden().frame(width: 80)
                     Button(role: .destructive) { controller.removeCustomRuleSet(entry.id) } label: { Image(systemName: "trash") }
+                        .accessibilityLabel("删除规则集 \(entry.name)")
                         .buttonStyle(.borderless).help("删除这个规则集")
                 }
             }
             HStack {
                 TextField("名称（可选）", text: $name).frame(width: 110)
                 TextField("规则集地址 https://…", text: $url)
-                Picker("", selection: $target) {
+                Picker("新规则集走哪条线", selection: $target) {
                     ForEach(CustomRuleSetSetting.targets, id: \.self) { Text(CustomRuleSetSetting.targetName($0)).tag($0) }
                 }
                 .labelsHidden().frame(width: 80)

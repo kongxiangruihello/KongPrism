@@ -7,12 +7,16 @@ import KongPrismCore
 // MARK: - 链接控制
 
 /// kongprism://connect · disconnect · toggle · mode/rule|global|direct · node/<名称> · test · update
+/// · recover（断开旧连接并重新测速）· sync（iCloud 同步）· reload（重载内核）· menu（菜单导出到 menu.txt）
 /// · settings/<订阅|节点|分流|网络|统计|常规|更新>（或 profiles/nodes/rules/network/stats/general/updates）· report · onboarding
 /// For Shortcuts, KongSeek, scripts. Import links (kongprism://install-config?url=…) are handled by Importer.
 enum URLActions {
-    static let actions: Set<String> = ["connect", "disconnect", "toggle", "mode", "node", "test", "update", "settings", "report", "onboarding", "rules"]
+    static let actions: Set<String> = ["connect", "disconnect", "toggle", "mode", "node", "test", "update", "settings", "report", "onboarding", "rules",
+                                          "recover", "sync", "reload", "menu"]
     /// Set by the app delegate, which owns the settings window.
     @MainActor static var openSettings: ((SettingsTab) -> Void)?
+    /// Set by the app delegate: the status menu as text (kongprism://menu writes it to menu.txt).
+    @MainActor static var dumpMenu: (() async -> String)?
 
     static func canHandle(_ url: URL) -> Bool {
         url.scheme?.lowercased() == "kongprism" && actions.contains(url.host?.lowercased() ?? "")
@@ -43,7 +47,21 @@ enum URLActions {
                 }
             }
         case "test": controller.testAllNodes()
-        case "update": Task { await controller.updateAllProfiles() }
+        case "update":
+            // ?auto=1 behaves like the scheduled update (few identities, pauses after a refusal).
+            let automatic = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "auto" && $0.value == "1" } ?? false
+            Task { await controller.updateAllProfiles(automatic: automatic) }
+        case "recover": Task { await controller.recoverConnections(reason: "链接动作", force: true) }
+        case "sync":
+            controller.pullFromICloud()
+            controller.pushToICloud()
+        case "reload": controller.reloadIfRunning()
+        case "menu":
+            Task {
+                guard let dump = dumpMenu else { return }
+                let text = await dump()
+                try? text.write(to: Paths.support.appendingPathComponent("menu.txt"), atomically: true, encoding: .utf8)
+            }
         case "settings":
             let key = argument.lowercased()
             let tab = SettingsTab(rawValue: key) ?? SettingsTab.allCases.first { $0.title.hasPrefix(argument) && !argument.isEmpty } ?? .general

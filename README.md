@@ -52,6 +52,8 @@ macOS 菜单栏代理客户端，内核为 [sing-box](https://github.com/SagerNe
 | `kongprism://settings/network` | 打开设置的某一页：profiles、nodes、rules、network、stats、general、updates |
 | `kongprism://report` | 生成问题报告（桌面 zip） |
 | `kongprism://onboarding` | 打开新手引导 |
+| `kongprism://recover` | 断开旧连接并重新测速（唤醒、切换网络后会自动做） |
+| `kongprism://sync` | 立即与 iCloud 云盘同步 |
 
 在终端里可以 `open kongprism://toggle`。
 
@@ -83,10 +85,13 @@ GitHub Actions 会编译、测试、打包，并发布带 `latest.json` 的 Rele
 ## 目录
 
 ```
-Sources/KongPrismCore   订阅解析、节点链接、Clash YAML、sing-box 配置生成（纯 Foundation，有单元测试）
-Sources/KongPrism       菜单栏 App：内核进程、系统代理、Clash API、设置窗口、在线更新
-Resources/rules         内置规则集（geosite-cn、geosite-geolocation-!cn、广告、geoip-cn）
-scripts/                download-core.sh（固定版本 + SHA-256）、build-app.sh
+Sources/KongPrismCore     订阅解析、节点链接、Clash YAML、sing-box 配置生成、日志统计、各种判断规则（纯 Foundation，有单元测试）
+Sources/KongPrism/App     AppController（状态与动作）、设置存储、系统调度
+Sources/KongPrism/Core    sing-box 进程、Clash API、系统代理、增强模式（TUN）
+Sources/KongPrism/…       Network、Subscriptions、Routing、Nodes、Features、Diagnostics、UI、Updates
+Resources/rules           内置规则集
+Tests/KongPrismCoreTests  单元测试；Fixtures/ 为脱敏后的真实订阅样本
+scripts/                  构建、内核下载（固定版本 + SHA-256）、CI 真机走查与测试服务器、无障碍检查
 ```
 
 数据位于 `~/Library/Application Support/KongPrism`（订阅、规则、下载的内核、日志）。

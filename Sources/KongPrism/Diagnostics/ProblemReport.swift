@@ -23,7 +23,7 @@ enum ProblemReport {
             func write(_ name: String, _ text: String) { try? text.write(to: folder.appendingPathComponent(name), atomically: true, encoding: .utf8) }
 
             let report = lines.map { ($0.ok == true ? "✅ " : $0.ok == false ? "❌ " : "• ") + $0.text }.joined(separator: "\n")
-            write("诊断.txt", "KongPrism \(AppUpdater.version)（\(AppUpdater.build)） · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)\n\n" + report)
+            write("诊断.txt", LogAnonymizer.anonymize("KongPrism \(AppUpdater.version)（\(AppUpdater.build)） · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)\n\n" + report))
             write("设置摘要.txt", settingsSummary(controller))
             // Crash reports from ~/Library/Logs/DiagnosticReports (KongPrism and sing-box, last 14 days).
             let crashes = CrashRecords.recentReports(days: 14).prefix(5)
@@ -49,8 +49,9 @@ enum ProblemReport {
             }
             // Logs last, so they include what happened while making this report.
             try? await Task.sleep(nanoseconds: 300_000_000)
-            write("app.log", tail(Paths.appLog, lines: 400))
-            write("core.log", tail(controller.core.logURL, lines: 400))
+            // Node servers' addresses are replaced (ip-1, ip-2…); websites' names stay for debugging.
+            write("app.log", LogAnonymizer.anonymize(tail(Paths.appLog, lines: 400)))
+            write("core.log", LogAnonymizer.anonymize(tail(controller.core.logURL, lines: 400)))
             let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
             let zip = desktop.appendingPathComponent("KongPrism-问题报告-\(stamp).zip")
             let result = await Shell.background {

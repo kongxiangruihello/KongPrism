@@ -65,6 +65,7 @@ final class AppController: ObservableObject {
     /// 0.6: nodes left out of the automatic groups until the date (自动避开连不上的节点).
     @Published private(set) var avoidedNodes: [String: Date] = [:]
     private var lastRecovery = Date.distantPast
+    private var reloadTask: Task<Void, Never>?
     func setAvoidedNodes(_ nodes: [String: Date]) { avoidedNodes = nodes }
     var lastRecoveryDate: Date { lastRecovery }
     func markRecovery() { lastRecovery = Date() }
@@ -337,14 +338,25 @@ final class AppController: ObservableObject {
         }
     }
 
-    func reloadIfRunning() {
+    /// Restarts the core with the current settings. Changes made within 1.2 seconds of each other
+    /// are applied with one restart (each restart drops every connection for a moment).
+    func reloadIfRunning(immediately: Bool = false) {
         guard status.isRunning else { return }
-        let core = core
-        Task {
+        reloadTask?.cancel()
+        reloadTask = Task {
+            if !immediately {
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if Task.isCancelled { return }
+            }
+            guard status.isRunning else { return }
+            reloadTask = nil
+            let core = core
+            let started = Date()
             await sampleTraffic(force: true)
             status = .stopped
             await Shell.background { core.stop() }
             connect()
+            AppLog.write("内核重载（停止用时 \(Int(Date().timeIntervalSince(started) * 1000)) ms）")
         }
     }
 
@@ -932,7 +944,7 @@ final class AppController: ObservableObject {
                 profiles[index].lastError = error.localizedDescription
                 if automatic, let refused = error as? SubscriptionFetcher.Refused {
                     // Wait as long as the server asked (Retry-After), otherwise three hours.
-                    let wait = min(24 * 3600, max(600, refused.retryAfter ?? 3 * 3600))
+                    let wait = UpdatePause.duration(retryAfter: refused.retryAfter)
                     profiles[index].pausedUntil = Date().addingTimeInterval(wait)
                     AppLog.write("订阅“\(profile.name)”被拒绝，自动更新暂停 \(Int(wait / 60)) 分钟")
                 }

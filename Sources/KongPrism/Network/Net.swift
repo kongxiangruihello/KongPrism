@@ -95,6 +95,8 @@ enum Net {
             } catch {
                 AppLog.write("请求失败（\(route.label)）\(url.host ?? ""): \(error.localizedDescription)")
                 lastError = error
+                // "Too many requests" holds for every route: do not ask again through the next one.
+                if let http = error as? HTTPError, http.status == 429 { break }
             }
         }
         throw lastError

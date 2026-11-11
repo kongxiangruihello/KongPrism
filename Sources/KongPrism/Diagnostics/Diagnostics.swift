@@ -123,7 +123,14 @@ enum Diagnostics {
         if !avoided.isEmpty {
             lines.append(Line(ok: nil, text: "自动选择正在避开：\(avoided.keys.sorted().joined(separator: "、"))（近 15 分钟连不上 5 次以上，1 小时后恢复）"))
         }
-        if let mismatch = controller.exitMismatch { lines.append(Line(ok: nil, text: "出口：\(mismatch)（仅供参考）")) }
+        // Exit IP through the proxy (the same lookup the menu uses; remembers which service answered).
+        if let exit = await ExitLookup.fetch(port: port) {
+            var text = "出口：" + exit.summary
+            if let mismatch = controller.exitMismatch(for: exit) { text += "；\(mismatch)（仅供参考）" }
+            lines.append(Line(ok: nil, text: text))
+        } else {
+            lines.append(Line(ok: false, text: "出口查询失败（ipinfo.io、ipapi.co、api.ip.sb 都没有回应）"))
+        }
 
         // 7. Recent core errors
         if settings.tunMode {
@@ -159,7 +166,7 @@ enum Diagnostics {
                 lines.append(Line(ok: nil, text: "另有 \(stats.networkDown) 条是网络暂时不可用时的报错（睡眠、唤醒或切换 Wi-Fi 时常见，不是节点问题）"))
             }
             let errors = log.split(whereSeparator: \.isNewline).filter { $0.contains("ERROR") || $0.contains("FATAL") }.suffix(3)
-            for line in errors { lines.append(Line(ok: nil, text: "内核日志：" + CheckError.readable(String(line)))) }
+            for line in errors { lines.append(Line(ok: nil, text: "内核日志：" + LogAnonymizer.anonymize(CheckError.readable(String(line))))) }
         }
         return lines
     }
