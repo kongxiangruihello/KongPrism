@@ -160,7 +160,9 @@ final class CoreManager: @unchecked Sendable {
 
     // MARK: Ports
 
-    /// True when nothing listens on 127.0.0.1:`port` (we can bind it ourselves).
+    /// True when nothing accepts connections on 127.0.0.1:`port`.
+    /// (A bind test would also fail while closed connections linger in TIME_WAIT after the
+    /// previous core stopped, which sing-box itself does not mind.)
     static func isPortFree(_ port: Int) -> Bool {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return true }
@@ -171,8 +173,39 @@ final class CoreManager: @unchecked Sendable {
         address.sin_port = in_port_t(UInt16(port).bigEndian)
         address.sin_addr.s_addr = inet_addr("127.0.0.1")
         let result = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
         }
-        return result == 0
+        return result != 0 // refused: nobody listens
+    }
+
+    /// The process listening on `port` (only this user's processes are visible to lsof).
+    static func listener(on port: Int) -> (pid: Int32, name: String)? {
+        let output = Shell.run("/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-Fpc"], timeout: 5).output
+        var pid: Int32?
+        var name = ""
+        for line in output.split(whereSeparator: \.isNewline) {
+            if line.hasPrefix("p"), pid == nil { pid = Int32(line.dropFirst()) }
+            if line.hasPrefix("c"), name.isEmpty { name = String(line.dropFirst()) }
+        }
+        return pid.map { ($0, name) }
+    }
+
+    /// Makes sure `port` can be used: a sing-box left behind by an earlier KongPrism is
+    /// stopped; anything else is reported by name.
+    func freePort(_ port: Int, label: String) throws {
+        guard !Self.isPortFree(port) else { return }
+        let owner = Self.listener(on: port)
+        lock.lock()
+        let ownPID = process?.processIdentifier
+        lock.unlock()
+        if let owner, owner.name.contains("sing-box"), owner.pid != ownPID {
+            kill(owner.pid, SIGTERM)
+            for _ in 0..<20 where !Self.isPortFree(port) { usleep(100_000) }
+            if !Self.isPortFree(port) { kill(owner.pid, SIGKILL); usleep(300_000) }
+            AppLog.write("已结束占用端口 \(port) 的残留 sing-box（PID \(owner.pid)）")
+            if Self.isPortFree(port) { return }
+        }
+        let who = owner.map { "“\($0.name)”" } ?? "其他程序（可能 KongBabel、Clash 等）"
+        throw CoreError("\(label) \(port) 被 \(who) 占用。请退出它，或在 设置 › 常规 里换一个端口")
     }
 }

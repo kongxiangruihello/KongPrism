@@ -116,9 +116,9 @@ final class AppController: ObservableObject {
         Task {
             let outcome: Result<CoreManager.Prepared, Error> = await Shell.background {
                 Result {
-                    for (name, value) in [("代理端口", port), ("控制端口", apiPort)] where !CoreManager.isPortFree(value) {
-                        throw CoreManager.CoreError("\(name) \(value) 已被占用（可能 KongBabel、Clash 等仍在运行），请退出它们或在设置里换一个端口")
-                    }
+                    core.stop()
+                    try core.freePort(port, label: "代理端口")
+                    try core.freePort(apiPort, label: "控制端口")
                     let prepared = try core.prepare(nodes: nodes, options: options)
                     try core.start()
                     return prepared
