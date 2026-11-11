@@ -73,6 +73,11 @@ public enum WhatsNew {
         Item(version: "0.8.0", text: "菜单打开更快；节点测试和出口查询每分钟最多一次，更省电", tab: nil),
         Item(version: "0.8.0", text: "网络一时出错时，订阅 10 分钟后自动重试；出错时间一目了然", tab: "profiles"),
         Item(version: "0.8.0", text: "内核日志轮换保留上一份，节点统计不再因日志清理而中断", tab: "nodes"),
+        Item(version: "0.9.0", text: "常用网站体检：每个网站走哪条线、能否打开、用时多少", tab: "rules"),
+        Item(version: "0.9.0", text: "诊断显示 AI 服务实际的出口地区，落在 ChatGPT / Claude 不支持的地区时提醒", tab: "network"),
+        Item(version: "0.9.0", text: "用电池或低电量模式时少测速，更省电", tab: "general"),
+        Item(version: "0.9.0", text: "设置导出 / 导入，不依赖 iCloud 也能迁移和备份", tab: "general"),
+        Item(version: "0.9.0", text: "内核没变时只下载精简更新包（约几 MB）；需要时可一键完全卸载", tab: "updates"),
     ]
 
     /// Highlights of every version after `old` up to and including `new`, newest first.

@@ -28,7 +28,8 @@ final class PowerState {
     }
 
     /// True when the Mac should not spend energy on extras (battery or Low Power Mode).
-    var shouldSave: Bool { onBattery || lowPower }
+    /// Hidden `forcePowerSaving` default: CI (on mains power) checks the battery behaviour.
+    var shouldSave: Bool { onBattery || lowPower || UserDefaults.standard.bool(forKey: "forcePowerSaving") }
 
     private func refresh() {
         let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue()

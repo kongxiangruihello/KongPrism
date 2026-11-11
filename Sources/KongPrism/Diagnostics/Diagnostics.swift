@@ -146,12 +146,34 @@ enum Diagnostics {
             lines.append(Line(ok: nil, text: "自动选择正在避开：\(avoided.keys.sorted().joined(separator: "、"))（近 15 分钟连不上 5 次以上，1 小时后恢复）"))
         }
         // Exit IP through the proxy (the same lookup the menu uses; remembers which service answered).
-        if let exit = await ExitLookup.fetch(port: port) {
+        let mainExit = await ExitLookup.fetch(port: port)
+        if let exit = mainExit {
             var text = "出口：" + exit.summary
             if let mismatch = controller.exitMismatch(for: exit) { text += "；\(mismatch)（仅供参考）" }
             lines.append(Line(ok: nil, text: text))
         } else {
             lines.append(Line(ok: false, text: "出口查询失败（ipinfo.io、ipapi.co、api.ip.sb 都没有回应）"))
+        }
+        // 0.9: where AI traffic exits (its own route when 按服务分流 sets one), and whether ChatGPT / Claude serve that region.
+        let aiExit: ExitInfo?
+        if let checkPort = controller.aiCheckPort {
+            aiExit = await ExitLookup.fetch(port: checkPort)
+        } else {
+            aiExit = mainExit
+        }
+        if let exit = aiExit {
+            let supported = AIRegions.isSupported(countryCode: exit.countryCode)
+            var text = "AI 服务出口：" + exit.summary
+            if supported == false {
+                text += "。ChatGPT、Claude 不在这个地区提供服务（OpenAI / Anthropic 公开的支持名单里没有），会提示地区不可用：请在 设置 › 分流 › 按服务分流 里把 AI 服务换成其他地区"
+            }
+            lines.append(Line(ok: supported == false ? false : nil, text: text))
+        } else if controller.aiCheckPort != nil {
+            lines.append(Line(ok: false, text: "AI 服务出口查询失败"))
+        }
+        // 0.9: 常用网站体检
+        for result in await SiteCheck.run(controller: controller) {
+            lines.append(Line(ok: result.ok ? nil : false, text: "体检 " + result.line))
         }
 
         // 7. Recent core errors

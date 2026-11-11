@@ -139,6 +139,7 @@ cat > "$SUPPORT/profiles.json" <<JSON
 JSON
 defaults write com.kongxiangrui.KongPrism lastSeenVersion 0.6.0
 defaults write com.kongxiangrui.KongPrism subscriptionRetrySeconds -float 5
+defaults write com.kongxiangrui.KongPrism ciTestActions -bool true
 
 step "启动 /Applications/KongPrism.app"
 open "$APP"
@@ -396,6 +397,11 @@ assert not found, f"报告里还有公网地址：{sorted(found)[:5]}"
 print("✅ 报告里的日志和诊断没有公网 IP（已替换成 ip-1、ip-2…）")
 PY
 grep -q "出口：" "$work"/report/*/诊断.txt
+grep -q "AI 服务出口：" "$work"/report/*/诊断.txt
+test "$(grep -c "体检 " "$work"/report/*/诊断.txt)" -eq 8
+grep -q "体检 www.baidu.com → 直连" "$work"/report/*/诊断.txt
+grep -q "体检 www.google.com → 节点选择" "$work"/report/*/诊断.txt
+echo "✅ 诊断含 AI 服务出口和 8 个常用网站体检（百度直连、Google 走节点）"
 grep -q "节点名称是日本，出口 IP 归属" "$work"/report/*/诊断.txt || echo "（出口没有判为不一致：$(grep "出口：" "$work"/report/*/诊断.txt)）"
 echo "出口查询服务：$(defaults read com.kongxiangrui.KongPrism exitLookupService)"
 echo "✅ 问题报告完整、日志已脱敏，诊断含出口信息"
@@ -460,6 +466,73 @@ assert float(timing["build_ms"]) < 100, "菜单构建太慢"
 assert float(timing["refresh_ms"]) < 500, "向内核取数据太慢"
 print("✅ 有新功能提示；订阅错误简短；菜单打开快")
 PY
+
+step "AI 服务出口检测入口"
+python3 - "$SUPPORT/runtime/config.json" "$API" <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1])); port = int(sys.argv[2]) + 1
+inbound = next(i for i in c["inbounds"] if i["tag"] == "ai-check")
+assert inbound["listen"] == "127.0.0.1" and inbound["listen_port"] == port, inbound
+rule = next(r for r in c["route"]["rules"] if r.get("inbound") == ["ai-check"])
+assert rule["outbound"] == "🤖 AI 服务", rule   # iCloud set AI to “自动（排除香港）” above
+print("✅ 检测入口只在本机监听，流量按 AI 服务的线路出去")
+PY
+country="$(curl -sS -m 15 -x "http://127.0.0.1:$((API + 1))" https://ipinfo.io/json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("country"))')"
+echo "AI 服务出口国家：$country"; test -n "$country"
+
+step "用电池时少测速"
+interval() { python3 -c "import json,sys; c=json.load(open(sys.argv[1])); print(next(o['interval'] for o in c['outbounds'] if o['tag'] == '自动选择'))" "$SUPPORT/runtime/config.json"; }
+echo "接电源：$(interval)"; test "$(interval)" = "10m"
+defaults write com.kongxiangrui.KongPrism forcePowerSaving -bool true
+link reload
+sleep 4; wait_for 20 api /version
+echo "用电池（模拟）：$(interval)"; test "$(interval)" = "30m"
+defaults delete com.kongxiangrui.KongPrism forcePowerSaving
+link reload
+sleep 4; wait_for 20 api /version
+test "$(interval)" = "10m"
+echo "✅ 用电池时自动选择每 30 分钟测一次，接电源恢复 10 分钟"
+
+step "设置导出与导入"
+link "export?path=$work/backup-nolinks.json"
+link "export?path=$work/backup.json&links=1"
+wait_for 10 test -f "$work/backup.json"
+wait_for 10 test -f "$work/backup-nolinks.json"
+python3 - "$work/backup.json" "$work/backup-nolinks.json" "$SUBPORT" <<'PY'
+import json, sys, uuid
+full = json.load(open(sys.argv[1])); bare = json.load(open(sys.argv[2]))
+assert full["includesLinks"] and any(p.get("url", "").endswith("/sub.yaml") for p in full["profiles"])
+assert not bare["includesLinks"] and not any(p.get("url") for p in bare["profiles"]), "不含链接的导出里不应有订阅链接"
+assert full["customRuleSets"] and "fileExtension" not in full["customRuleSets"][0]
+full["profiles"].append({"id": str(uuid.uuid4()).upper(), "name": "CI 导入", "url": f"http://127.0.0.1:{sys.argv[3]}/sub.yaml?imported=1"})
+full["favoriteNodes"] = ["CI 日本 01"]
+json.dump(full, open(sys.argv[1], "w"), ensure_ascii=False)
+print("✅ 导出：含链接 / 不含链接两种都对")
+PY
+link "import?path=$work/backup.json"
+imported() { python3 -c "import json,sys; p=[x for x in json.load(open(sys.argv[1])) if x['name']=='CI 导入']; sys.exit(0 if p and p[0]['nodeCount']==5 else 1)" "$SUPPORT/profiles.json"; }
+wait_for 30 imported
+python3 -c "import json,sys; assert json.load(open(sys.argv[1]))['favoriteNodes'] == ['CI 日本 01']" "$SUPPORT/settings.json"
+echo "✅ 导入：新增的订阅已下载（5 个节点），收藏按文件替换"
+
+step "增强模式（TUN）：在 App 里开启"
+link "tun/on"
+wait_for 60 bash -c 'test -f /etc/sudoers.d/kongprism'
+wait_for 40 bash -c 'route -n get 1.1.1.1 | grep -q "interface: utun"'
+route -n get 1.1.1.1 | grep interface
+sleep 3
+code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' https://www.apple.com/library/test/success.html)"
+echo "不设代理直接访问：HTTP $code"; test "$code" = 200
+api /connections | python3 -c 'import json,sys; c=json.load(sys.stdin); print("经过（root）内核的下载字节：", c["downloadTotal"]); assert c["downloadTotal"] > 0'
+TUN_PID="$(sudo cat "/Library/Application Support/KongPrismTUN/sing-box.pid")"
+t0="$(ps -o cputime= -p "$TUN_PID" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))')"
+sleep 30
+t1="$(ps -o cputime= -p "$TUN_PID" | python3 -c 'import sys; p=sys.stdin.read().strip().replace(",",".").split(":"); print(sum(float(x)*60**i for i,x in enumerate(reversed(p))))')"
+python3 -c "import sys; d=float(sys.argv[2])-float(sys.argv[1]); print(f'增强模式空闲 30 秒：root 内核 CPU {d:.2f} 秒'); assert d < 1.5" "$t0" "$t1"
+link "tun/off"
+wait_for 30 bash -c '! route -n get 1.1.1.1 | grep -q "interface: utun"'
+wait_for 30 api /version
+echo "✅ App 内开启增强模式：全部流量经过内核、空闲省电；关闭后路由恢复、回到系统代理模式"
 
 step "关闭代理，系统代理复原"
 link disconnect
@@ -528,6 +601,51 @@ for account in "subscription:$PROFILE_ID" "subscription:$LIMITED_ID" "subscripti
 done
 defaults delete com.kongxiangrui.KongPrism lastSeenVersion >/dev/null 2>&1 || true
 defaults delete com.kongxiangrui.KongPrism subscriptionRetrySeconds >/dev/null 2>&1 || true
+
+step "在线更新：内核没变时只下载精简包"
+open "$APP"
+wait_for 20 pgrep -x KongPrism
+sleep 3
+feed="$work/www/feed"; mkdir -p "$feed"
+new="$work/new/KongPrism.app"; mkdir -p "$work/new"
+ditto "$APP" "$new"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 9.9.9" -c "Set :CFBundleVersion 999" "$new/Contents/Info.plist"
+codesign --force --sign - --identifier com.kongxiangrui.KongPrism "$new"   # the core inside stays as it is
+codesign --verify --deep --strict "$new"
+(cd "$work/new" && ditto -c -k --keepParent KongPrism.app "$feed/KongPrism-9.9.9.zip")
+rm "$new/Contents/MacOS/sing-box"
+(cd "$work/new" && ditto -c -k --keepParent KongPrism.app "$feed/KongPrism-9.9.9-lite.zip")
+python3 - "$feed" "$APP/Contents/MacOS/sing-box" <<'PY'
+import hashlib, json, os, sys
+feed, core = sys.argv[1:3]
+sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+json.dump({"version": "9.9.9", "build": 999, "notes": "CI", "asset": "KongPrism-9.9.9.zip", "sha256": sha(f"{feed}/KongPrism-9.9.9.zip"),
+           "liteAsset": "KongPrism-9.9.9-lite.zip", "liteSha256": sha(f"{feed}/KongPrism-9.9.9-lite.zip"), "coreSha256": sha(core)},
+          open(f"{feed}/latest.json", "w"))
+for name in ("KongPrism-9.9.9.zip", "KongPrism-9.9.9-lite.zip"):
+    print(f"{name}: {os.path.getsize(f'{feed}/{name}') / 1048576:.1f} MB")
+PY
+defaults write com.kongxiangrui.KongPrism updateFeedURL "http://127.0.0.1:$SUBPORT/feed/"
+link install-update
+wait_for 90 bash -c 'test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" /Applications/KongPrism.app/Contents/Info.plist)" = 9.9.9'
+wait_for 30 grep -q "已更新到 9.9.9" "$SUPPORT/logs/app.log"
+grep "精简更新包" "$SUPPORT/logs/app.log" | tail -1 | cut -c21-
+test "$(hits /feed/KongPrism-9.9.9-lite.zip)" = 1 && test "$(hits /feed/KongPrism-9.9.9.zip)" = 0
+codesign --verify --deep --strict /Applications/KongPrism.app
+echo "✅ 只下载了精简包，放回内核后签名完整，已更新并重新打开 9.9.9"
+defaults delete com.kongxiangrui.KongPrism updateFeedURL
+
+step "完全卸载"
+sleep 3
+link uninstall
+wait_for 30 bash -c '! pgrep -x KongPrism'
+test ! -e "$SUPPORT"
+! defaults read com.kongxiangrui.KongPrism >/dev/null 2>&1
+test ! -e /Library/PrivilegedHelperTools/com.kongxiangrui.KongPrism.tun
+test ! -e /etc/sudoers.d/kongprism
+if [[ "$SYSTEM_PROXY" == true ]]; then ! scutil --proxy | grep -q "HTTPPort : $PORT"; fi
+! pgrep -f "KongPrism.app/Contents/MacOS/sing-box" >/dev/null
+echo "✅ 已恢复系统代理、移除辅助程序和授权文件、删除数据与设置，程序已退出"
 
 step "全部通过"
 ls -la "$SHOTS"

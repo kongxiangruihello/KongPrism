@@ -53,6 +53,11 @@ public struct AppRelease: Codable, Equatable, Sendable {
     public var asset: String
     public var sha256: String
     public var minimumSystemVersion: String?
+    /// 0.9: the same app without Contents/MacOS/sing-box, for when the installed core is
+    /// byte-identical to the new one (coreSha256); much smaller than `asset`.
+    public var liteAsset: String?
+    public var liteSha256: String?
+    public var coreSha256: String?
 
     public init(version: String, build: Int?, notes: String?, asset: String, sha256: String, minimumSystemVersion: String?) {
         self.version = version

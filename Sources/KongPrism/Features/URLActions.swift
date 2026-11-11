@@ -12,11 +12,15 @@ import KongPrismCore
 /// For Shortcuts, KongSeek, scripts. Import links (kongprism://install-config?url=…) are handled by Importer.
 enum URLActions {
     static let actions: Set<String> = ["connect", "disconnect", "toggle", "mode", "node", "test", "update", "settings", "report", "onboarding", "rules",
-                                          "recover", "sync", "reload", "menu", "whatsnew"]
+                                          "recover", "sync", "reload", "menu", "whatsnew",
+                                          "tun", "uninstall", "export", "import", "install-update"]
     /// Set by the app delegate, which owns the settings window.
     @MainActor static var openSettings: ((SettingsTab) -> Void)?
     /// Set by the app delegate: the status menu as text (kongprism://menu writes it to menu.txt).
     @MainActor static var dumpMenu: (() async -> String)?
+    /// Hidden `ciTestActions` default: enables the test-only links (export / import with a path,
+    /// uninstall without asking, installing an update from a link).
+    static var ciActions: Bool { UserDefaults.standard.bool(forKey: "ciTestActions") }
 
     static func canHandle(_ url: URL) -> Bool {
         url.scheme?.lowercased() == "kongprism" && actions.contains(url.host?.lowercased() ?? "")
@@ -52,6 +56,26 @@ enum URLActions {
             let automatic = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "auto" && $0.value == "1" } ?? false
             Task { await controller.updateAllProfiles(automatic: automatic) }
         case "whatsnew": WhatsNewNotice.show()
+        case "tun": controller.setTunMode(argument.lowercased() == "on", ask: !ciActions)
+        case "uninstall":
+            // Always asks first — except on a CI machine that opted in (a web page cannot set that default).
+            Uninstaller.run(controller: controller, ask: !ciActions)
+        case "export", "import", "install-update":
+            // File paths and installing from a link are for CI only.
+            guard ciActions else { AppLog.write("链接动作 \(url.host ?? "") 只用于测试，已忽略"); return }
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let path = query.first { $0.name == "path" }?.value ?? ""
+            switch url.host?.lowercased() {
+            case "export":
+                try? BackupActions.export(controller: controller, to: URL(fileURLWithPath: path), includeLinks: query.contains { $0.name == "links" && $0.value == "1" })
+            case "import":
+                if let backup = try? SettingsBackup.read(URL(fileURLWithPath: path)) { BackupActions.apply(backup, controller: controller) }
+            default:
+                Task {
+                    await controller.checkAppUpdate(userInitiated: true)
+                    controller.installAppUpdate()
+                }
+            }
         case "recover": Task { await controller.recoverConnections(reason: "链接动作", force: true) }
         case "sync":
             controller.pullFromICloud()

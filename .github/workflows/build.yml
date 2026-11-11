@@ -163,6 +163,7 @@ jobs:
           path: |
             build/KongPrism-*.zip
             build/KongPrism-*.dmg
+            build/core.sha256
             build/build.log
           if-no-files-found: error
 
@@ -184,17 +185,24 @@ jobs:
           fi
           zip="build/KongPrism-$version.zip"
           sha="$(cat "$zip.sha256")"
+          lite="build/KongPrism-$version-lite.zip"
+          lite_sha="$(cat "$lite.sha256")"
+          core_sha="$(cat build/core.sha256)"
+          # Is the core byte-identical to the previous release's? (Then 0.9+ apps download only the lite zip.)
+          previous_core="$(curl -sL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("coreSha256",""))' 2>/dev/null || true)"
+          echo "内核 SHA-256：$core_sha；上一版：${previous_core:-（没有记录）}"
           build="$(git rev-list --count HEAD)"
           # Release notes: the CHANGELOG section of this version.
           awk -v v="$version" '$0 ~ "^## " v "( |$)" {p=1; next} /^## / {if (p) exit} p' CHANGELOG.md > notes.md || true
           [[ -s notes.md ]] || echo "KongPrism $version" > notes.md
-          python3 - "$version" "$build" "$sha" "KongPrism-$version.zip" <<'PY'
+          python3 - "$version" "$build" "$sha" "KongPrism-$version.zip" "KongPrism-$version-lite.zip" "$lite_sha" "$core_sha" <<'PY'
           import json, sys
-          version, build, sha, asset = sys.argv[1:5]
+          version, build, sha, asset, lite, lite_sha, core_sha = sys.argv[1:8]
           notes = open("notes.md", encoding="utf-8").read().strip()
           json.dump({"version": version, "build": int(build), "notes": notes, "asset": asset,
-                     "sha256": sha, "minimumSystemVersion": "13.0"},
+                     "sha256": sha, "minimumSystemVersion": "13.0",
+                     "liteAsset": lite, "liteSha256": lite_sha, "coreSha256": core_sha},
                     open("latest.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
           PY
           cat latest.json
-          gh release create "v$version" "$zip" "build/KongPrism-$version.dmg" latest.json --target "$GITHUB_SHA" --title "KongPrism $version" --notes-file notes.md
+          gh release create "v$version" "$zip" "$lite" "build/KongPrism-$version.dmg" latest.json --target "$GITHUB_SHA" --title "KongPrism $version" --notes-file notes.md

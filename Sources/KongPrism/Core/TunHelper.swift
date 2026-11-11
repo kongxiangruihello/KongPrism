@@ -100,6 +100,9 @@ enum TunHelper {
     }
 
     private static func runAsAdministrator(_ shell: String, prompt: String) throws {
+        // Where sudo needs no password at all (e.g. a CI machine) use it; `-n` never prompts, so for
+        // everyone else this fails at once and the usual administrator dialog follows.
+        if Shell.run("/usr/bin/sudo", ["-n", "/bin/sh", "-c", shell], timeout: 60).ok { return }
         let escaped = shell.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let source = "do shell script \"\(escaped)\" with administrator privileges with prompt \"\(prompt)\""
         var error: NSDictionary?

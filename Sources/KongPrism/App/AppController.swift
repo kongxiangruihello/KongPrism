@@ -66,6 +66,9 @@ final class AppController: ObservableObject {
     @Published private(set) var avoidedNodes: [String: Date] = [:]
     private var lastRecovery = Date.distantPast
     private var reloadTask: Task<Void, Never>?
+    /// 0.9: whether the running config uses the battery test interval; the AI check port, if any.
+    private(set) var appliedPowerSaving = false
+    private(set) var aiCheckPort: Int?
     func setAvoidedNodes(_ nodes: [String: Date]) { avoidedNodes = nodes }
     var lastRecoveryDate: Date { lastRecovery }
     func markRecovery() { lastRecovery = Date() }
@@ -153,8 +156,15 @@ final class AppController: ObservableObject {
         }
         traffic.onUpdate = { [weak self] up, down in self?.speed = (up, down) }
         PowerState.shared.onChange = { [weak self] in
-            self?.updateSpeedMonitor()
-            self?.objectWillChange.send()
+            guard let self else { return }
+            self.updateSpeedMonitor()
+            self.objectWillChange.send()
+            // Plugged in / unplugged: apply the other test interval (one reload, about 0.3 s).
+            let saving = self.settings.batterySaverTesting && PowerState.shared.shouldSave
+            if self.status.isRunning, saving != self.appliedPowerSaving {
+                AppLog.write(saving ? "用电池 / 低电量模式：测速间隔放宽" : "接上电源：测速间隔恢复")
+                self.reloadIfRunning()
+            }
         }
         networkWatcher.onChange = { [weak self] fingerprint in self?.networkChanged(fingerprint) }
         networkWatcher.start()
@@ -240,6 +250,14 @@ final class AppController: ObservableObject {
         let backup = backupNodes()
         var options = settings.coreOptions
         options.avoidNodes = Set(avoidedNodes.filter { $0.value > Date() }.keys)
+        // 0.9: test less often on battery / Low Power Mode.
+        let saving = settings.batterySaverTesting && PowerState.shared.shouldSave
+        options.testIntervalMinutes = PowerPolicy.testInterval(base: settings.testIntervalMinutes, saving: saving)
+        appliedPowerSaving = saving
+        // 0.9: a local-only inbound that leaves like AI traffic (诊断 › AI 服务出口).
+        let checkPort = settings.apiPort + 1
+        options.aiCheckPort = settings.aiExitCheck && checkPort != settings.mixedPort && CoreManager.isPortFree(checkPort) ? checkPort : nil
+        aiCheckPort = options.aiCheckPort
         let tun = settings.tunMode
         // In enhanced mode the TUN interface carries the traffic; the system proxy stays untouched.
         let setProxy = settings.setSystemProxy && !tun
@@ -770,10 +788,11 @@ final class AppController: ObservableObject {
     // MARK: Enhanced mode
 
     /// Turns enhanced mode (TUN) on or off; the first time it installs the helper (administrator password).
-    func setTunMode(_ on: Bool) {
+    func setTunMode(_ on: Bool, ask: Bool = true) {
         guard on != settings.tunMode else { return }
         if on && !TunHelper.isInstalled {
             guard let binary = core.binary() else { coreTask = .failed("找不到内核"); return }
+            if ask {
             NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = "安装增强模式（TUN）？"
@@ -781,6 +800,7 @@ final class AppController: ObservableObject {
             alert.addButton(withTitle: "安装")
             alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { objectWillChange.send(); return }
+            }
             do {
                 try TunHelper.install(core: binary)
             } catch {
@@ -985,6 +1005,18 @@ final class AppController: ObservableObject {
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain { return FailureKind.classify(urlErrorCode: ns.code) }
         return .other
+    }
+
+    /// 设置导入: a profile from a backup file (pasted ones bring their nodes).
+    func addImportedProfile(_ profile: Profile, nodes: [ProxyNode]?) {
+        var profile = profile
+        if let nodes {
+            Store.saveNodes(nodes, for: profile.id)
+            profile.nodeCount = nodes.count
+            profile.updatedAt = Date()
+        }
+        profiles.append(profile)
+        saveProfiles()
     }
 
     /// The subscription downloaded fine somewhere else (问题报告): an old error no longer applies.

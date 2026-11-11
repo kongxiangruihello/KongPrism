@@ -59,7 +59,11 @@ enum AppLog {
         return formatter
     }()
 
+    /// Set while uninstalling: nothing may recreate the deleted folders.
+    static var disabled = false
+
     static func write(_ message: String) {
+        guard !disabled else { return }
         let line = "\(formatter.string(from: Date())) \(message)\n"
         queue.async {
             let url = Paths.appLog
@@ -139,6 +143,12 @@ struct AppSettings: Codable, Equatable {
     var maxMultiplier: Double = 0
     /// 0.8: the GitHub token is in the keychain (githubToken is filled in after loading).
     var githubTokenInKeychain = false
+    /// 0.9 features
+    var batterySaverTesting = true
+    var aiExitCheck = true
+    var siteChecks: [String] = AppSettings.defaultSiteChecks
+    static let defaultSiteChecks = ["claude.ai", "chatgpt.com", "gemini.google.com", "www.google.com", "docs.google.com",
+                                    "github.com", "www.youtube.com", "www.baidu.com"]
     /// Bumped when a default changes for everyone (see the migration in init(from:)).
     var settingsVersion = AppSettings.currentVersion
 
@@ -200,6 +210,9 @@ struct AppSettings: Codable, Equatable {
         avoidFailingNodes = v(.avoidFailingNodes, d.avoidFailingNodes)
         maxMultiplier = v(.maxMultiplier, d.maxMultiplier)
         githubTokenInKeychain = v(.githubTokenInKeychain, d.githubTokenInKeychain)
+        batterySaverTesting = v(.batterySaverTesting, d.batterySaverTesting)
+        aiExitCheck = v(.aiExitCheck, d.aiExitCheck)
+        siteChecks = v(.siteChecks, d.siteChecks)
         let version = v(.settingsVersion, 1)
         // 0.1.0 resolved unknown domains through the domestic DNS and sent the IP to the
         // proxy, which broke sites with polluted answers; turn that off once for everyone.

@@ -111,6 +111,18 @@ if [[ $zip -eq 1 ]]; then
   echo "$sha" > "$zip_path.sha256"
   echo "Zip: $zip_path"
   echo "SHA-256: $sha"
+  # Lite package (更新包瘦身): the same signed app without the core, used when the installed core
+  # is byte-identical (the updater checks core.sha256 and puts its own core back in).
+  lite_stage="$staging/lite"
+  rm -rf "$lite_stage"; mkdir -p "$lite_stage"
+  ditto "$root/build/KongPrism.app" "$lite_stage/KongPrism.app"
+  rm "$lite_stage/KongPrism.app/Contents/MacOS/sing-box"
+  lite_path="$root/build/KongPrism-$version-lite.zip"
+  rm -f "$lite_path"
+  ditto -c -k --keepParent "$lite_stage/KongPrism.app" "$lite_path"
+  shasum -a 256 "$lite_path" | awk '{print $1}' > "$lite_path.sha256"
+  shasum -a 256 "$root/build/KongPrism.app/Contents/MacOS/sing-box" | awk '{print $1}' > "$root/build/core.sha256"
+  echo "Lite zip: $lite_path ($(du -h "$lite_path" | cut -f1)), core SHA-256 $(cat "$root/build/core.sha256")"
 fi
 
 if [[ $dmg -eq 1 ]]; then

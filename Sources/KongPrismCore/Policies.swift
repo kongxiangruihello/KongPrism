@@ -112,3 +112,39 @@ public enum LogAnonymizer {
         return lower == "::1" || lower.hasPrefix("fe80") || lower.hasPrefix("fc") || lower.hasPrefix("fd") || lower == "::"
     }
 }
+
+
+/// Which update package to download (更新包瘦身).
+public enum UpdatePlan: Equatable {
+    case full(asset: String, sha256: String)
+    /// Download the app without its core and put the installed (identical) core back in.
+    case lite(asset: String, sha256: String)
+
+    public static func choose(_ release: AppRelease, installedCoreSha256: String?) -> UpdatePlan {
+        if let lite = release.liteAsset, let liteSha = release.liteSha256, let wanted = release.coreSha256,
+           let installed = installedCoreSha256, installed.lowercased() == wanted.lowercased() {
+            return .lite(asset: lite, sha256: liteSha)
+        }
+        return .full(asset: release.asset, sha256: release.sha256)
+    }
+}
+
+/// 用电池时少测速.
+public enum PowerPolicy {
+    /// Minutes between automatic latency tests: on battery or Low Power Mode at least 30
+    /// (three times the usual), otherwise the setting.
+    public static func testInterval(base: Int, saving: Bool) -> Int {
+        saving ? max(30, base * 3) : base
+    }
+}
+
+/// Where AI services refuse to work (OpenAI's and Anthropic's published supported-regions lists
+/// leave these out): an AI exit here means ChatGPT / Claude will show a region error.
+public enum AIRegions {
+    public static let unsupported: Set<String> = ["CN", "HK", "MO", "RU", "BY", "IR", "KP", "SY", "CU"]
+
+    public static func isSupported(countryCode: String?) -> Bool? {
+        guard let code = countryCode?.uppercased(), code.count == 2 else { return nil }
+        return !unsupported.contains(code)
+    }
+}

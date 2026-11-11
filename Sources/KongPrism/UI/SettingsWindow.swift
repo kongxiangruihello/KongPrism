@@ -306,10 +306,19 @@ struct GeneralView: View {
                 Text("每秒刷新一次，会多耗一点电；默认关闭。").font(.caption).foregroundStyle(.secondary)
                 Toggle("使用电池或低电量模式时暂停网速显示", isOn: $controller.settings.pauseSpeedOnBattery)
                     .onChange(of: controller.settings.pauseSpeedOnBattery) { _ in controller.updateSpeedMonitor() }
+                Toggle("使用电池或低电量模式时少测速（自动选择每 30 分钟测一次）", isOn: $controller.settings.batterySaverTesting)
+                    .onChange(of: controller.settings.batterySaverTesting) { _ in controller.reloadIfRunning() }
             }
             Section("提醒与自动处理") {
                 Toggle("手选的节点连不上时，自动切回“自动选择”", isOn: $controller.settings.autoFailover)
                 Toggle("订阅快到期或流量快用完时发系统通知", isOn: $controller.settings.usageNotifications)
+            }
+            Section("备份与迁移") {
+                HStack {
+                    Button("导出设置…") { BackupActions.exportInteractively(controller: controller) }
+                    Button("导入设置…") { BackupActions.importInteractively(controller: controller) }
+                }
+                Text("不依赖 iCloud：换电脑、重装系统或留一份备份。导出时可选是否包含订阅链接。").font(.caption).foregroundStyle(.secondary)
             }
             Section("iCloud 云盘同步") {
                 Toggle("在多台 Mac 之间同步订阅和自定义规则", isOn: $controller.settings.iCloudSync)
@@ -371,6 +380,9 @@ struct NetworkSettingsView: View {
                 Text("支持 https://、tls://、quic://、h3:// 或纯 IP。修改后重新开启代理生效。").font(.caption).foregroundStyle(.secondary)
             }
             Section("测速") {
+                Toggle("诊断时查询 AI 服务的出口地区", isOn: $controller.settings.aiExitCheck)
+                    .onChange(of: controller.settings.aiExitCheck) { _ in controller.reloadIfRunning() }
+                Text("为此内核多监听一个仅本机可用的端口（控制端口 + 1）；出口在 ChatGPT、Claude 不支持的地区时提醒。").font(.caption).foregroundStyle(.secondary)
                 TextField("测速地址", text: $controller.settings.testURL)
                 Stepper("自动选择每 \(controller.settings.testIntervalMinutes) 分钟测一次（仅在使用时）",
                         value: $controller.settings.testIntervalMinutes, in: 3...60)
@@ -410,6 +422,9 @@ struct RulesView: View {
             }
             Section("按服务分流") {
                 ServiceRoutingSection()
+            }
+            Section("常用网站体检") {
+                SiteCheckSection()
             }
             Section("规则") {
                 Toggle("拦截广告域名（geosite-category-ads-all）", isOn: $controller.settings.blockAds)
@@ -572,6 +587,7 @@ struct AboutView: View {
                     Button("导出脱敏订阅样本…") { Diagnostics.exportSample(controller: controller) }
                     Button("生成问题报告") { ProblemReport.create(controller: controller) }
                     Button("新手引导…") { Onboarding.show() }
+                    Button("完全卸载…") { Uninstaller.run(controller: controller) }
                 }
                 Text(ShellExports.command(port: controller.settings.mixedPort)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }

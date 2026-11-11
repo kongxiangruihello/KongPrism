@@ -138,6 +138,9 @@ public struct CoreOptions: Equatable, Sendable {
     public var avoidNodes: Set<String> = []
     /// Leave nodes with a higher traffic multiplier (流量倍率) out of the automatic groups; nil = no limit.
     public var maxMultiplier: Double?
+    /// 0.9: a local-only inbound whose traffic always takes the AI service's route, so the app can
+    /// look up where AI traffic actually exits (诊断 › AI 服务出口). nil = none.
+    public var aiCheckPort: Int?
 
     public var routedServices: [Service] {
         Service.allCases.filter { (serviceTargets[$0.rawValue] ?? Service.follow) != Service.follow }
@@ -274,6 +277,12 @@ public enum ConfigBuilder {
         var rules: [JSONValue] = [
             ["action": "sniff"],
             ["protocol": "dns", "action": "hijack-dns"],
+        ]
+        if options.aiCheckPort != nil {
+            // Before everything else: the check must leave exactly like AI traffic (or like 节点选择 when AI follows it).
+            rules.append(["inbound": ["ai-check"], "outbound": .string(serviceOutbound[.ai] ?? Groups.select)])
+        }
+        rules += [
             ["ip_is_private": true, "outbound": .string(Groups.direct)],
             ["clash_mode": "Direct", "outbound": .string(Groups.direct)],
             ["clash_mode": "Global", "outbound": .string(Groups.select)],
@@ -357,6 +366,9 @@ public enum ConfigBuilder {
             "listen": .string(options.allowLAN ? "0.0.0.0" : "127.0.0.1"),
             "listen_port": .int(options.mixedPort),
         ]]
+        if let port = options.aiCheckPort {
+            inbounds.append(["type": "mixed", "tag": "ai-check", "listen": "127.0.0.1", "listen_port": .int(port)])
+        }
         if options.tun {
             // "mixed" stack: the system TCP stack (cheapest) with gVisor for UDP.
             inbounds.append([

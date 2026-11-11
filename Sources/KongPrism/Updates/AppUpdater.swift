@@ -15,16 +15,24 @@ enum AppUpdater {
         let release: AppRelease
         /// API URL of the zip asset when a token is used, otherwise the public download URL.
         let assetURL: URL
+        /// The same for the lite package (app without the core), when the release has one.
+        var liteURL: URL?
+    }
+
+    /// Hidden `updateFeedURL` default (CI): a folder with latest.json and the zips instead of GitHub.
+    private static var feedOverride: String? {
+        UserDefaults.standard.string(forKey: "updateFeedURL").flatMap { $0.hasSuffix("/") ? $0 : $0 + "/" }
     }
 
     /// Reads latest.json of the newest release. With a GitHub token (needed while the
     /// repository is private) it goes through the API; otherwise the public download link.
     static func check(token: String, routes: [Net.Route]) async throws -> Found {
-        if token.isEmpty {
-            let base = "https://github.com/\(owner)/\(repo)/releases/latest/download/"
-            let (data, _) = try await Net.get(URL(string: base + "latest.json")!, routes: routes)
+        if token.isEmpty || feedOverride != nil {
+            let base = feedOverride ?? "https://github.com/\(owner)/\(repo)/releases/latest/download/"
+            let (data, _) = try await Net.get(URL(string: base + "latest.json")!, routes: feedOverride == nil ? routes : [.direct])
             let release = try decode(data)
-            return Found(release: release, assetURL: URL(string: base + release.asset)!)
+            return Found(release: release, assetURL: URL(string: base + release.asset)!,
+                         liteURL: release.liteAsset.flatMap { URL(string: base + $0) })
         }
         let headers = apiHeaders(token)
         let (data, _) = try await Net.get(URL(string: "https://api.github.com/repos/\(owner)/\(repo)/releases/latest")!, headers: headers, routes: routes)
@@ -38,7 +46,7 @@ enum AppUpdater {
         let (manifest, _) = try await Net.get(manifestURL, headers: downloadHeaders, routes: routes)
         let release = try decode(manifest)
         guard let zip = assetURL(release.asset) else { throw CoreManager.CoreError("最新发布里没有 \(release.asset)") }
-        return Found(release: release, assetURL: zip)
+        return Found(release: release, assetURL: zip, liteURL: release.liteAsset.flatMap(assetURL))
     }
 
     static func isNewer(_ release: AppRelease) -> Bool {
@@ -66,12 +74,28 @@ enum AppUpdater {
             headers = apiHeaders(token)
             headers["Accept"] = "application/octet-stream"
         }
-        let zip = try await Net.download(found.assetURL, headers: headers, routes: routes, progress: progress)
+        // 更新包瘦身: when the installed core is byte-identical to the new release's core, download the
+        // app without it (a few MB instead of ~30) and put the installed core back in. The bundle
+        // signature covers the core, so `codesign --verify` below proves the result is the signed app.
+        let installedCore = Paths.bundledCore.flatMap { try? Net.sha256(of: $0) }
+        var plan = UpdatePlan.choose(found.release, installedCoreSha256: installedCore)
+        if case .lite = plan, found.liteURL == nil { plan = .full(asset: found.release.asset, sha256: found.release.sha256) }
+        let (url, expected, lite): (URL, String, Bool) = {
+            switch plan {
+            case .lite(_, let sha): return (found.liteURL!, sha, true)
+            case .full(_, let sha): return (found.assetURL, sha, false)
+            }
+        }()
+        let routesForDownload = feedOverride == nil ? routes : [Net.Route.direct]
+        let zip = try await Net.download(url, headers: headers, routes: routesForDownload, progress: progress)
         let digest = try Net.sha256(of: zip)
-        guard digest.lowercased() == found.release.sha256.lowercased() else {
+        guard digest.lowercased() == expected.lowercased() else {
             try? FileManager.default.removeItem(at: zip)
             throw CoreManager.CoreError("下载的文件校验失败（SHA-256 不一致），已放弃安装")
         }
+        let size = (try? FileManager.default.attributesOfItem(atPath: zip.path)[.size] as? Int) ?? 0
+        AppLog.write(lite ? "精简更新包 \(size / 1_048_576) MB（内核未变，沿用已安装的内核）" : "完整更新包 \(size / 1_048_576) MB")
+        let currentCore = Paths.bundledCore
         let work = Paths.updates.appendingPathComponent("app-\(found.release.version)", isDirectory: true)
         try? FileManager.default.removeItem(at: work)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
@@ -81,13 +105,27 @@ enum AppUpdater {
             let unzip = Shell.run("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
             guard unzip.ok, FileManager.default.fileExists(atPath: newApp.path) else { throw CoreManager.CoreError("解压更新失败") }
             Shell.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", newApp.path])
+            if lite {
+                guard let currentCore else { throw CoreManager.CoreError("找不到已安装的内核") }
+                let target = newApp.appendingPathComponent("Contents/MacOS/sing-box")
+                let copy = Shell.run("/usr/bin/ditto", [currentCore.path, target.path])
+                guard copy.ok else { throw CoreManager.CoreError("放回内核失败：\(copy.output)") }
+            }
             let info = NSDictionary(contentsOf: newApp.appendingPathComponent("Contents/Info.plist"))
             guard info?["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier else { throw CoreManager.CoreError("更新包不是 KongPrism") }
             let verify = Shell.run("/usr/bin/codesign", ["--verify", "--deep", newApp.path])
             guard verify.ok else { throw CoreManager.CoreError("更新包签名无效：\(verify.output)") }
             return ()
         }
-        try checked.get()
+        do {
+            try checked.get()
+        } catch where lite {
+            // Something did not match (e.g. the installed core was modified): take the full package.
+            AppLog.write("精简更新包没有通过校验（\(error.localizedDescription)），改下完整包")
+            var full = found
+            full.liteURL = nil
+            return try await stage(full, token: token, routes: routes, progress: progress)
+        }
         return newApp
     }
 
