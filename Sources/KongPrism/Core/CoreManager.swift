@@ -221,10 +221,13 @@ final class CoreManager: @unchecked Sendable {
         return result == 0
     }
 
-    /// Waits (up to `seconds`) until every port can be bound.
-    static func waitForPorts(_ ports: [Int], seconds: Double = 5) {
-        let deadline = Date().addingTimeInterval(seconds)
+    /// Waits (up to `seconds`) until every port can be bound; returns how long it took.
+    @discardableResult
+    static func waitForPorts(_ ports: [Int], seconds: Double = 5) -> TimeInterval {
+        let start = Date()
+        let deadline = start.addingTimeInterval(seconds)
         while Date() < deadline, !ports.allSatisfy(canBind) { usleep(100_000) }
+        return Date().timeIntervalSince(start)
     }
 
     static func isPortFree(_ port: Int) -> Bool {
