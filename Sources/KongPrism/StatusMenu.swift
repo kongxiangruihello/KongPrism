@@ -125,12 +125,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             entry.state = merging ? .mixed : (controller.selectedProfile?.id == profile.id ? .on : .off)
             var detail = "\(profile.nodeCount) 个节点"
             if let usage = profile.usage { detail += " · " + usage.summary }
+            if let error = profile.lastError { detail = "更新失败：" + (error.count > 40 ? String(error.prefix(40)) + "…" : error) }
             entry.toolTip = detail
             profileMenu.addItem(entry)
             let info = NSMenuItem(title: "    " + detail, action: nil, keyEquivalent: "")
             info.isEnabled = false
             info.attributedTitle = NSAttributedString(string: "    " + detail, attributes: [
-                .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor])
+                .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: profile.lastError == nil && profile.nodeCount > 0 ? NSColor.secondaryLabelColor : NSColor.systemRed])
             profileMenu.addItem(info)
         }
         if controller.profiles.count > 1 {

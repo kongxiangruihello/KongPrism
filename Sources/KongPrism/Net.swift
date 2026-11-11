@@ -7,11 +7,14 @@ enum Net {
     enum Route {
         case direct
         case viaProxy(port: Int)
+        /// Whatever the system proxy currently is (another client such as KongBabel).
+        case system
 
         var label: String {
             switch self {
             case .direct: return "直连"
             case .viaProxy(let port): return "经代理 127.0.0.1:\(port)"
+            case .system: return "经系统代理"
             }
         }
     }
@@ -36,6 +39,8 @@ enum Net {
                 kCFNetworkProxiesSOCKSEnable as String: 0,
                 kCFNetworkProxiesProxyAutoConfigEnable as String: 0,
             ]
+        case .system:
+            configuration.connectionProxyDictionary = nil
         case .viaProxy(let port):
             configuration.connectionProxyDictionary = [
                 kCFNetworkProxiesHTTPEnable as String: 1,

@@ -38,6 +38,13 @@ enum SystemProxy {
         return enabled && host == "127.0.0.1" && proxyPort == port
     }
 
+    /// True when any HTTP / HTTPS / SOCKS / PAC proxy is set.
+    static var hasAnyProxy: Bool {
+        guard let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] else { return false }
+        return [kCFNetworkProxiesHTTPEnable, kCFNetworkProxiesHTTPSEnable, kCFNetworkProxiesSOCKSEnable, kCFNetworkProxiesProxyAutoConfigEnable]
+            .contains { (settings[$0 as String] as? Int) == 1 }
+    }
+
     static var hasBackup: Bool { FileManager.default.fileExists(atPath: Paths.proxyBackup.path) }
 
     // MARK: Changing

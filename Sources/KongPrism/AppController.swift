@@ -56,9 +56,23 @@ final class AppController: ObservableObject {
     }
 
     /// For downloads that should prefer the tunnel (GitHub): proxy first, then direct.
-    var proxyFirst: [Net.Route] { status.isRunning ? [.viaProxy(port: settings.mixedPort), .direct] : [.direct] }
+    var proxyFirst: [Net.Route] { status.isRunning ? [.viaProxy(port: settings.mixedPort), .direct] : [.direct] + borrowedProxy }
     /// For subscriptions (often reachable directly, some refuse proxy IPs): direct first.
-    var directFirst: [Net.Route] { status.isRunning ? [.direct, .viaProxy(port: settings.mixedPort)] : [.direct] }
+    var directFirst: [Net.Route] { status.isRunning ? [.direct, .viaProxy(port: settings.mixedPort)] : [.direct] + borrowedProxy }
+    /// When KongPrism is off but another client set a system proxy, downloads may try it too
+    /// (a provider's subscription domain is often blocked for direct connections).
+    private var borrowedProxy: [Net.Route] {
+        SystemProxy.hasAnyProxy && !SystemProxy.isPointing(to: settings.mixedPort) ? [.system] : []
+    }
+
+    /// Why connecting now would leave the user without any node, if it would.
+    var missingNodesReason: String? {
+        if settings.mergeAllProfiles, profiles.contains(where: { $0.nodeCount > 0 }) { return nil }
+        guard let profile = selectedProfile else { return "还没有订阅，请先添加订阅" }
+        guard profile.nodeCount == 0 else { return nil }
+        if let error = profile.lastError { return "订阅“\(profile.name)”没有节点：\(error)" }
+        return "订阅“\(profile.name)”里没有节点，请在 设置 › 订阅 里更新它"
+    }
 
     // MARK: Launch / quit
 
@@ -105,6 +119,11 @@ final class AppController: ObservableObject {
 
     func connect() {
         guard status != .starting else { return }
+        // Connecting with no node would send everything direct and look "connected" while foreign sites fail.
+        if let reason = missingNodesReason {
+            fail(reason)
+            return
+        }
         status = .starting
         restartAttempts = 0
         let nodes = activeNodes()
@@ -375,7 +394,11 @@ final class AppController: ObservableObject {
                 profiles[index].lastError = error.localizedDescription
                 saveProfiles()
             }
-            subscriptionTask = .failed("\(profile.name) 更新失败：\(error.localizedDescription)")
+            var message = "\(profile.name) 更新失败：\(error.localizedDescription)"
+            if error is URLError, !status.isRunning {
+                message += "。订阅域名可能在国内直连不通：可先开着其他代理软件（如 KongBabel）再点“立即更新”，KongPrism 会借用系统代理下载"
+            }
+            subscriptionTask = .failed(message)
             throw error
         }
     }

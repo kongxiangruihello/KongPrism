@@ -47,7 +47,20 @@ enum Diagnostics {
             lines.append(Line(ok: false, text: "发现有 TUN 网卡接管默认路由（通常是另一个代理软件的增强/TUN 模式）"))
         }
 
-        // 4. Direct internet
+        // 4. Subscription
+        if let profile = controller.selectedProfile {
+            var text = "订阅“\(profile.name)”：\(profile.nodeCount) 个节点"
+            if let format = profile.format { text += "（\(format)）" }
+            if let date = profile.updatedAt { text += "，更新于 \(date.formatted(date: .abbreviated, time: .shortened))" }
+            if profile.skipped > 0 { text += "，跳过 \(profile.skipped) 个不支持的" }
+            if let host = profile.url.flatMap({ URL(string: $0)?.host }) { text += "，订阅域名 \(host)" }
+            lines.append(Line(ok: profile.nodeCount > 0, text: text))
+            if let error = profile.lastError { lines.append(Line(ok: false, text: "上次更新失败：\(error)")) }
+        } else {
+            lines.append(Line(ok: false, text: "还没有订阅"))
+        }
+
+        // 5. Direct internet
         let direct = await probe("https://www.baidu.com", route: .direct)
         lines.append(Line(ok: direct.ok, text: "不经代理访问百度：\(direct.text)"))
 
@@ -56,7 +69,8 @@ enum Diagnostics {
         // 5. Through KongPrism
         let domestic = await probe("https://www.baidu.com", route: .viaProxy(port: port))
         lines.append(Line(ok: domestic.ok, text: "经 KongPrism 访问百度（应直连）：\(domestic.text)"))
-        let foreign = await probe("https://www.gstatic.com/generate_204", route: .viaProxy(port: port))
+        // www.google.com is blocked for direct connections; gstatic is not, so it would prove nothing.
+        let foreign = await probe("https://www.google.com/generate_204", route: .viaProxy(port: port))
         lines.append(Line(ok: foreign.ok, text: "经 KongPrism 访问 Google（走节点）：\(foreign.text)"))
 
         // 6. Nodes
@@ -64,7 +78,8 @@ enum Diagnostics {
         let snapshot = controller.snapshot
         if let now = snapshot.groups[Groups.select]?.now {
             let detail = snapshot.groups[now]?.now.map { "\(now) → \($0)" } ?? now
-            lines.append(Line(ok: nil, text: "当前节点：\(detail)"))
+            lines.append(Line(ok: now == Groups.direct ? false : nil,
+                              text: now == Groups.direct ? "当前节点：直连（国外网站不会走代理）" : "当前节点：\(detail)"))
         }
         let total = snapshot.groups[Groups.auto]?.all.count ?? 0
         if total > 0, let delays = try? await controller.api.testGroup(Groups.auto, url: settings.testURL, timeoutMs: 5000) {
