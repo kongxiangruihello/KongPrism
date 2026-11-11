@@ -317,6 +317,11 @@ final class AppController: ObservableObject {
                 }
             }
             status = .running
+            // Enhanced mode switched while this start was under way: start again in the right mode.
+            if core.tunMode != settings.tunMode {
+                AppLog.write("启动期间切换了增强模式，重新启动内核")
+                reloadIfRunning(immediately: true)
+            }
             settings.wasConnected = true
             stats.coreRestarted()
             exitFetchedAt = nil
@@ -372,9 +377,15 @@ final class AppController: ObservableObject {
             reloadTask = nil
             let core = core
             let started = Date()
+            let port = settings.mixedPort
+            // Switching to enhanced mode: the TUN interface replaces the system proxy.
+            let restoreProxy = settings.tunMode
             await sampleTraffic(force: true)
             status = .stopped
-            await Shell.background { core.stop() }
+            await Shell.background {
+                core.stop()
+                if restoreProxy, SystemProxy.hasBackup { try? SystemProxy.restore(port: port) }
+            }
             connect()
             AppLog.write("内核重载（停止用时 \(Int(Date().timeIntervalSince(started) * 1000)) ms）")
         }
@@ -809,23 +820,10 @@ final class AppController: ObservableObject {
                 return
             }
         }
-        let wasRunning = status.isRunning
-        if wasRunning {
-            // Stop the current core (and system proxy) before switching modes.
-            let port = settings.mixedPort
-            let core = core
-            status = .stopped
-            Task {
-                await Shell.background {
-                    if SystemProxy.hasBackup { try? SystemProxy.restore(port: port) }
-                    core.stop()
-                }
-                settings.tunMode = on
-                connect()
-            }
-        } else {
-            settings.tunMode = on
-        }
+        settings.tunMode = on
+        // Through the reload path (it cancels a pending reload, so two restarts cannot race and start
+        // the core in the old mode — seen in CI right after importing settings).
+        if status.isRunning { reloadIfRunning(immediately: true) }
     }
 
     func uninstallTunHelper() {
