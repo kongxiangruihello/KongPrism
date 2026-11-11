@@ -1,4 +1,5 @@
 import Foundation
+import KongPrismCore
 import CryptoKit
 
 /// HTTP helpers. Every session sets its proxy explicitly, so requests never loop
