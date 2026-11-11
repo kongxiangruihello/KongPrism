@@ -360,7 +360,8 @@ assert [r["name"] for r in s["customRuleSets"]] == ["CI 拦截", "另一台 Mac 
 assert s["directDomains"] == ["example.cn"]
 print("✅ 收到另一台 Mac 的收藏、按服务分流和自定义规则集（新规则集已下载）")
 PY
-wait_for 20 grep -q '"favoriteNodes"' "$CLOUD/KongPrism/sync.json"
+written_back() { python3 -c "import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))['device'] != '另一台 Mac' else 1)" "$CLOUD/KongPrism/sync.json"; }
+wait_for 20 written_back
 python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['device'] != '另一台 Mac' and d['favoriteNodes'] == ['CI-SS'] and len(d['customRuleSets']) == 2; print('✅ 本机写回 iCloud：', d['device'])" "$CLOUD/KongPrism/sync.json"
 
 step "菜单内容"
