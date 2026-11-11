@@ -115,7 +115,7 @@ enum Diagnostics {
             let best = alive.min { $0.value < $1.value }
             // Say what the test covered: 自动选择 may leave nodes out (multiplier limit, avoided nodes).
             let configured = max(controller.configNodeCount, total)
-            var scope = "自动选择范围内 \(total) 个"
+            var outsideNote = ""
             if configured > total {
                 var reasons: [String] = []
                 let limit = settings.maxMultiplier
@@ -127,10 +127,11 @@ enum Diagnostics {
                 if byAvoid > 0 { reasons.append("\(byAvoid) 个因暂时避开") }
                 let rest = configured - total - byRate - byAvoid
                 if rest > 0 { reasons.append("\(rest) 个属于备用订阅或其他原因") }
-                scope += "（另有 \(reasons.joined(separator: "、"))不在范围内）"
+                outsideNote = "；另有 \(reasons.joined(separator: "、"))，不在测速范围内"
             }
-            var text = "节点测速（\(scope)）：\(alive.count)/\(total) 个可用"
+            var text = "节点测速：自动选择范围内 \(total) 个，\(alive.count) 个可用"
             if let best { text += "，最快 \(best.key) \(best.value) ms" }
+            text += outsideNote
             if alive.isEmpty { text += "。全部不通：订阅可能过期，或节点协议转换有问题（把本报告发给开发者）" }
             lines.append(Line(ok: !alive.isEmpty, text: text))
         } else if total == 0 {

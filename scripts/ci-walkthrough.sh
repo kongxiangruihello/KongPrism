@@ -492,7 +492,7 @@ wait_for 40 api /version
 u0="$(grep -c "订阅 127.0.0.1：Clash，5 个节点" "$SUPPORT/logs/app.log")"
 link update
 wait_for 30 bash -c "test \$(grep -c '订阅 127.0.0.1：Clash，5 个节点' '$SUPPORT/logs/app.log') -gt $u0"
-echo "✅ 重新打开后从钥匙串读出链接，订阅更新成功"
+echo "✅ 重新打开后读出保存的订阅链接，订阅更新成功"
 for tab in profiles nodes rules network general updates; do
   link "settings/$tab"
   shot "dark-settings-$tab"
